@@ -1,0 +1,22 @@
+{
+  "name": "find-jacob",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "playwright test --trace off"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.9"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^6.1.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

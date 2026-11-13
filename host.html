@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Who's coming · Find Jacob</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <style>
+      body { padding: 24px 16px 48px; }
+      .host { max-width: 760px; margin: 0 auto; }
+      .host h1 { margin: 0 0 4px; font-size: 1.6rem; }
+      .host table { width: 100%; border-collapse: collapse; margin-top: 16px; background: #fffdf5; }
+      .host th, .host td { padding: 10px 12px; text-align: left; border-bottom: 2px dashed rgba(43, 90, 69, 0.3); }
+      .host th { font-size: 0.82rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
+      .host td.num, .host th.num { text-align: right; font-variant-numeric: tabular-nums; }
+      .host .scroll { overflow-x: auto; border: 2.5px solid var(--line); border-radius: 16px; }
+      .host .total { display: inline-block; margin: 12px 0 0; padding: 6px 14px; font-weight: 700; background: var(--butter); border-radius: 999px; }
+      .host form { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+      .host form input { flex: 1 1 220px; min-height: 48px; padding: 10px 12px; font: inherit; border: 2px solid var(--line); border-radius: 12px; }
+    </style>
+  </head>
+  <body>
+    <main class="host">
+      <h1>Who's coming</h1>
+      <p id="status" class="muted" role="status">Loading…</p>
+      <form id="key-form" hidden>
+        <input id="key-input" type="password" autocomplete="off" aria-label="Host key" placeholder="Host key" />
+        <button class="btn btn--primary" type="submit">Show responses</button>
+      </form>
+      <p id="total" class="total" hidden></p>
+      <div class="scroll" id="table-wrap" hidden>
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Coming?</th><th class="num">People</th><th>Character</th><th>Last updated</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </main>
+    <script type="module" src="/src/host.ts"></script>
+  </body>
+</html>
