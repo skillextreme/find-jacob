@@ -90,7 +90,7 @@ function showAttendees(arrive: "all" | "self" | "none"): void {
   invite?.setCount(attendees ? total : null, (attendees?.guests ?? []).flatMap((g) =>
     g.displayName ? [g.pets?.length ? `${g.displayName} (with ${g.pets.map((p) => p.name).join(" and ")})` : g.displayName] : [],
   ));
-  invite?.setLeaders((attendees?.guests ?? []).flatMap((g) => (g.displayName && g.secrets ? [{ name: g.displayName, secrets: g.secrets }] : [])));
+  invite?.setLeaders((attendees?.guests ?? []).flatMap((g) => (g.displayName ? [{ name: g.displayName, secrets: g.secrets ?? 0 }] : [])));
   if (!park) return;
   park.setGuests(attendees?.guests ?? [], you, arrive === "all" ? "all" : arrive === "self" ? you : null);
 }
@@ -121,6 +121,38 @@ async function loadAttendees(): Promise<void> {
     // The park and the RSVP keep working without the shared gathering.
   }
 }
+
+/**
+ * Keeps the park and the leaderboard live: checks for other guests' changes every few seconds
+ * while the invitation is open, and straight away when the guest comes back to the tab.
+ */
+const REFRESH_MS = 10_000;
+let myKey: string | null = null;
+let refreshing = false;
+async function refreshAttendees(): Promise<void> {
+  if (refreshing || app.dataset.state !== "invite" || document.hidden) return;
+  if (park?.dragging || invite?.busy) return;
+  refreshing = true;
+  try {
+    const fresh = await fetchAttendees();
+    // Don't touch the park if the guest started dragging or saving while we were asking.
+    if (park?.dragging || invite?.busy || app.dataset.state !== "invite") return;
+    if (JSON.stringify(fresh) === JSON.stringify(attendees)) return;
+    const rec = loadRsvp();
+    if (!myKey && rec?.saved) myKey = await guestKey(rec.id);
+    attendees = fresh;
+    const index = myKey && rec?.saved && rec.status === "yes" ? fresh.guests.findIndex((g) => g.key === myKey) : -1;
+    you = index === -1 ? null : index;
+    showAttendees("none");
+  } catch {
+    // Offline for a moment: keep showing what we have.
+  } finally {
+    refreshing = false;
+  }
+}
+window.setInterval(() => void refreshAttendees(), REFRESH_MS);
+document.addEventListener("visibilitychange", () => void refreshAttendees());
+window.addEventListener("focus", () => void refreshAttendees());
 
 const SEARCH_LABEL = finder.getAttribute("aria-label") ?? "";
 

@@ -166,6 +166,8 @@ export class Park {
   private guests: PublicGuest[] = [];
   /** Set to let this device's guest drag their own character. Called with the new position on drop. */
   onGuestDrop: ((pos: [number, number]) => void) | null = null;
+  /** True while the guest is holding their character. */
+  dragging = false;
   private you: number | null = null;
   private inv: DOMMatrix | null = null;
   private fwd: DOMMatrix | null = null;
@@ -421,6 +423,7 @@ export class Park {
         /* capture is a nicety */
       }
       g.classList.add("dragging");
+      this.dragging = true;
     });
     g.addEventListener("pointermove", (e) => {
       if (!start) return;
@@ -434,6 +437,7 @@ export class Park {
     const end = (commit: boolean) => {
       if (!start) return;
       start = null;
+      this.dragging = false;
       g.classList.remove("dragging");
       if (!moved) return;
       if (!commit) {

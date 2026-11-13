@@ -94,7 +94,7 @@ async function mockApi(page: Page): Promise<MockApi> {
   const api: MockApi = { posts: [], failNext: 0, guests: [], delayMs: 0 };
   let total = 0;
   await page.route("**/api/attendees", (route: Route) =>
-    route.fulfill({ json: { totalComing: total, guests: api.guests } }),
+    route.fulfill({ json: { totalComing: Math.max(total, api.guests.length), guests: api.guests } }),
   );
   await page.route("**/api/rsvp", async (route: Route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -583,6 +583,17 @@ test.describe("rsvp", () => {
     await expect(page.locator("#leaders li")).toHaveText(["Asha3 of 7"]);
     expect(api.posts[1]).toMatchObject({ secrets: 3, status: "yes" });
     expect(api.posts[1].id).toBe(api.posts[0].id);
+
+    // It's live: other guests' progress shows up without a reload, and everyone coming is listed.
+    api.guests = [
+      ...api.guests,
+      { key: "aaaaaaaaaaaa", character: "0.3.2.3.4", displayName: "Rohan", secrets: 6 },
+      { key: "bbbbbbbbbbbb", character: "2.1.1.0.2", displayName: "Meera" },
+    ];
+    await expect(page.locator("#leaders li")).toHaveText(["Rohan6 of 7", "Asha3 of 7", "Meera0 of 7"], { timeout: 20_000 });
+    await expect(page.locator("#park .guest")).toHaveCount(3);
+    // This device's own character is still the draggable one.
+    await expect(page.locator("#park .guest.you")).toHaveCount(1);
   });
 });
 

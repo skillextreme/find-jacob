@@ -51,6 +51,11 @@ export class Invite {
     this.showInitialView();
   }
 
+  /** True while a save is in flight. */
+  get busy(): boolean {
+    return this.saving;
+  }
+
   focusHeading(): void {
     this.$("#invite-title").focus({ preventScroll: false });
   }
@@ -97,7 +102,7 @@ export class Invite {
       <div id="leaders" class="leaders">
         <p class="leaders__title">Secret finders <span class="muted">There are ${LIMITS.secretsTotal} hidden in the park. Tap around.</span></p>
         <ol id="leaders-list"></ol>
-        <p id="leaders-empty" class="leaders__empty">No one’s on the board yet. Find one and say yes to be first.</p>
+        <p id="leaders-empty" class="leaders__empty">No one’s on the board yet. Say yes to join it.</p>
       </div>
       <form id="rsvp-form" novalidate>
         <h3 id="rsvp-h">Are you coming?</h3>
@@ -448,7 +453,8 @@ export class Invite {
   /** Top secret finders, as a tiny leaderboard. */
   setLeaders(rows: { name: string; secrets: number }[]): void {
     const box = this.$("#leaders");
-    const top = rows.filter((r) => r.secrets > 0).sort((a, b) => b.secrets - a.secrets).slice(0, 5);
+    // Everyone who's coming is on the board, best finders first.
+    const top = [...rows].sort((a, b) => b.secrets - a.secrets).slice(0, 8);
     box.hidden = false;
     this.$("#leaders-empty").hidden = top.length > 0;
     const list = this.$("#leaders-list");
