@@ -1,0 +1,541 @@
+import { expect, test, type Page, type Route, type TestInfo } from "@playwright/test";
+
+const isPhone = (info: TestInfo) => info.project.name === "phone";
+
+interface Lens {
+  x: number;
+  y: number;
+  r: number;
+}
+
+/** Where the window currently is, in page pixels. */
+async function lens(page: Page): Promise<Lens> {
+  return page.evaluate(() => {
+    const svg = document.querySelector<SVGSVGElement>("#park")!;
+    const hole = document.querySelector<SVGCircleElement>("#mask-hole")!;
+    const m = svg.getScreenCTM()!;
+    const p = new DOMPoint(hole.cx.baseVal.value, hole.cy.baseVal.value).matrixTransform(m);
+    return { x: p.x, y: p.y, r: hole.r.baseVal.value * m.a };
+  });
+}
+
+/** Centre of Jacob's body in page pixels. */
+async function jacob(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => {
+    const b = document.querySelector("#it-jacob .figure")!.getBoundingClientRect();
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  });
+}
+
+async function touchDrag(page: Page, points: [number, number][]): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  const [first, ...rest] = points;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: first[0], y: first[1] }] });
+  for (const [x, y] of rest) {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y }] });
+    await page.waitForTimeout(20);
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
+
+/** Moves the window to a page position with the project's input: mouse, or press-and-drag. */
+async function lookAt(page: Page, info: TestInfo, x: number, y: number): Promise<void> {
+  if (!isPhone(info)) {
+    await page.mouse.move(x - 40, y - 30);
+    await page.mouse.move(x, y, { steps: 4 });
+    return;
+  }
+  const l = await lens(page);
+  const vp = page.viewportSize()!;
+  const offset = l.r + 12; // the window sits above the finger
+  const fy = y + offset;
+  expect(fy, "the finger position must be on screen").toBeLessThan(vp.height - 2);
+  const side = x > vp.width / 2 ? -1 : 1;
+  await touchDrag(page, [
+    [x + side * 60, fy - 50],
+    [x + side * 30, fy - 25],
+    [x, fy],
+  ]);
+}
+
+async function open(page: Page): Promise<void> {
+  await page.goto("/");
+  await expect(page.locator("#app")).toHaveAttribute("data-state", "searching");
+}
+
+async function findJacob(page: Page, info: TestInfo): Promise<void> {
+  const j = await jacob(page);
+  await lookAt(page, info, j.x, j.y);
+  await expect(page.locator("#jacob-bubble")).toBeVisible();
+  await expect(page.locator("#jacob-bubble")).toHaveText("Found me?");
+  if (isPhone(info)) await page.touchscreen.tap(j.x, j.y);
+  else await page.mouse.click(j.x, j.y);
+  await expect(page.locator("#app")).toHaveAttribute("data-state", "invite");
+}
+
+async function skipToInvite(page: Page): Promise<void> {
+  await open(page);
+  await page.locator("#skip").click();
+  await expect(page.locator("#app")).toHaveAttribute("data-state", "invite");
+  await expect(page.locator("#invite-title")).toBeFocused();
+}
+
+interface MockApi {
+  posts: Record<string, unknown>[];
+  failNext: number;
+  guests: { character: string; displayName?: string }[];
+  delayMs: number;
+}
+
+/** Stands in for the Netlify functions. */
+async function mockApi(page: Page): Promise<MockApi> {
+  const api: MockApi = { posts: [], failNext: 0, guests: [], delayMs: 0 };
+  let total = 0;
+  await page.route("**/api/attendees", (route: Route) =>
+    route.fulfill({ json: { totalComing: total, guests: api.guests } }),
+  );
+  await page.route("**/api/rsvp", async (route: Route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    api.posts.push(body);
+    if (api.delayMs) await new Promise((r) => setTimeout(r, api.delayMs));
+    if (api.failNext > 0) {
+      api.failNext--;
+      return route.fulfill({ status: 500, json: { error: "server_error" } });
+    }
+    total = body.status === "yes" ? (body.partySize as number) : 0;
+    api.guests =
+      body.status === "yes" && body.character
+        ? [{ character: body.character as string, ...(body.publicName ? { displayName: body.publicName as string } : {}) }]
+        : [];
+    return route.fulfill({ json: { ok: true, attendees: { totalComing: total, guests: api.guests }, you: api.guests.length ? 0 : null } });
+  });
+  return api;
+}
+
+test.describe("search", () => {
+  test("shows a preview, then the window follows the pointer or finger", async ({ page }, info) => {
+    await open(page);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("I found us a spot. Can you find me?");
+    await expect(page.locator("#instruction")).toHaveText(isPhone(info) ? "Hold and drag to find me" : "Move around to find me");
+    await expect(page.locator("#portrait svg")).toBeVisible();
+
+    // A preview patch is visible before any input.
+    const before = await lens(page);
+    expect(before.r).toBeGreaterThan(50);
+    await page.screenshot({ path: info.outputPath("1-hidden.png") });
+
+    const vp = page.viewportSize()!;
+    const tx = Math.round(vp.width * 0.3);
+    const ty = Math.round(vp.height * 0.55);
+    await lookAt(page, info, tx, ty);
+    const after = await lens(page);
+    // The centre is exactly where the guest pointed: no tracking lag.
+    expect(Math.abs(after.x - tx)).toBeLessThan(2);
+    expect(Math.abs(after.y - ty)).toBeLessThan(2);
+    expect(after.r * 2).toBeGreaterThan(isPhone(info) ? 135 : 175);
+    expect(after.r * 2).toBeLessThan(isPhone(info) ? 165 : 210);
+
+    // The cover is still on everywhere else, and the page cannot scroll during the search.
+    await expect(page.locator("#park")).toHaveAttribute("data-cover", "covering");
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1)).toBe(true);
+
+    // Pausing grows the window by about 15%.
+    await page.waitForTimeout(900);
+    const grown = await lens(page);
+    expect(grown.r / after.r).toBeGreaterThan(1.12);
+    expect(grown.r / after.r).toBeLessThan(1.18);
+  });
+
+  test("on a phone the window sits above the finger and stays after release", async ({ page }, info) => {
+    test.skip(!isPhone(info), "touch only");
+    await open(page);
+    const before = await lens(page);
+    await touchDrag(page, [
+      [100, 520],
+      [140, 500],
+      [180, 480],
+    ]);
+    const l = await lens(page);
+    expect(Math.abs(l.x - 180)).toBeLessThan(2);
+    // Bottom edge of the window is above the fingertip.
+    expect(l.y + before.r).toBeLessThan(480);
+    await page.waitForTimeout(300);
+    const later = await lens(page);
+    expect(Math.abs(later.x - l.x) + Math.abs(later.y - l.y)).toBeLessThan(1);
+  });
+
+  test("optional discoveries react without finishing the game", async ({ page }, info) => {
+    await open(page);
+    for (const id of ["dog", "bush", "duck"]) {
+      const c = await page.evaluate((sel) => {
+        const b = document.querySelector(sel)!.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      }, `#it-${id}`);
+      await lookAt(page, info, c.x, c.y);
+      await expect(page.locator(`#it-${id}`)).toHaveClass(/react/);
+    }
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "searching");
+    await expect(page.locator("#live")).toContainText(/duck/i);
+  });
+
+  test("finding Jacob reveals the whole park and the invitation", async ({ page }, info) => {
+    await open(page);
+    const j = await jacob(page);
+    await lookAt(page, info, j.x, j.y);
+    await expect(page.locator("#jacob-bubble")).toHaveText("Found me?");
+    await expect(page.locator("#it-jacob")).toHaveClass(/wave/);
+    await page.screenshot({ path: info.outputPath("2-found.png") });
+
+    if (isPhone(info)) await page.touchscreen.tap(j.x, j.y);
+    else await page.mouse.click(j.x, j.y);
+    // Repeated input during the reveal cannot restart it.
+    await expect(page.locator("#app")).toHaveAttribute("data-state", /revealing|invite/);
+    if (!isPhone(info)) await page.mouse.click(j.x, j.y);
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "invite");
+    await expect(page.locator("#park")).toHaveAttribute("data-cover", "gone");
+
+    const card = page.locator("#invite");
+    await expect(card).toBeVisible();
+    await expect(card.getByRole("heading", { level: 2 })).toHaveText("You found me! Now come hang out.");
+    await expect(card).toContainText("It’s my birthday. Let’s spend an afternoon in the park.");
+    await expect(card).toContainText("Sunday 15 November 2026");
+    await expect(card).toContainText("3:00");
+    await expect(card).toContainText("6:00 pm");
+    await expect(card).toContainText("Cubbon Park");
+    await expect(card).toContainText("active wear");
+    await expect(card).toContainText("Exact spot will be shared on WhatsApp.");
+    await expect(card).not.toContainText(/rain/i);
+    await expect(card.locator("#map-link")).toHaveCount(0);
+    await expect(page.locator("#invite-title")).toBeFocused();
+    await expect(page.locator("#invite-title")).toBeInViewport();
+
+    // The page scrolls normally after the game.
+    if (isPhone(info)) {
+      expect(await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)).toBe(true);
+      expect(await page.evaluate(() => getComputedStyle(document.getElementById("finder")!).touchAction)).toBe("auto");
+    }
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: info.outputPath("3-invitation.png") });
+  });
+
+  test("clues appear at about 10 and 20 seconds, and the last one finishes the game", async ({ page }, info) => {
+    await open(page);
+    const vp = page.viewportSize()!;
+    // Look somewhere far from Jacob, and keep looking.
+    await lookAt(page, info, vp.width * 0.15, vp.height * 0.4);
+    await expect(page.locator("#hint-plane")).toBeHidden();
+    await page.waitForTimeout(8_000);
+    await expect(page.locator("#hint-plane")).toBeHidden();
+    await expect(page.locator("#instruction")).toHaveText("Hint: follow the paper plane", { timeout: 4_000 });
+    await expect(page.locator("#hint-plane")).toBeVisible();
+    await expect(page.locator("#jacob-bubble")).toBeHidden();
+
+    await expect(page.locator("#jacob-bubble")).toHaveText("Over here!", { timeout: 13_000 });
+    await expect(page.locator("#jacob-bubble")).toBeVisible();
+    // Progress is kept when the viewport changes (rotation).
+    await page.setViewportSize({ width: vp.height, height: vp.width });
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "searching");
+    await expect(page.locator("#jacob-bubble")).toBeVisible();
+    await page.setViewportSize(vp);
+    await page.locator("#jacob-bubble").click();
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "invite");
+  });
+
+  test("keyboard only: arrow keys find Jacob and Enter opens the invitation", async ({ page }) => {
+    await open(page);
+    await page.keyboard.press("Tab");
+    await expect(page.locator("#finder")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#live")).toContainText("Jacob isn't in view yet");
+
+    const j = await jacob(page);
+    for (let i = 0; i < 60; i++) {
+      if (await page.locator("#jacob-bubble").isVisible()) break;
+      const l = await lens(page);
+      const dx = j.x - l.x;
+      const dy = j.y - l.y;
+      await page.keyboard.press(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "ArrowRight" : "ArrowLeft") : dy > 0 ? "ArrowDown" : "ArrowUp");
+    }
+    await expect(page.locator("#instruction")).toHaveText("Use the arrow keys to find me");
+    await expect(page.locator("#jacob-bubble")).toBeVisible();
+    await expect(page.locator("#live")).toContainText("Jacob");
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "invite");
+    await expect(page.locator("#invite-title")).toBeFocused();
+  });
+
+  test("the Reveal invitation control works from the keyboard", async ({ page }) => {
+    await open(page);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(page.locator("#skip")).toBeFocused();
+    await expect(page.locator("#skip")).toHaveText("Reveal invitation");
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "invite");
+    await expect(page.locator("#invite")).toContainText("Cubbon Park");
+  });
+
+  test("reduced motion: the search still works and the reveal is a short fade", async ({ page }, info) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await open(page);
+    await findJacob(page, info);
+    await expect(page.locator("#invite-title")).toBeFocused();
+    await expect(page.locator("#invite")).toContainText("Sunday 15 November 2026");
+  });
+});
+
+test.describe("rsvp", () => {
+  test("the decline joke dodges once and never submits by itself", async ({ page }, info) => {
+    const api = await mockApi(page);
+    await skipToInvite(page);
+    await page.locator("#rsvp-name").fill("Asha Rao");
+    const no = page.locator("#rsvp-no");
+    const yes = page.locator("#rsvp-yes");
+    await no.scrollIntoViewIfNeeded();
+    const start = (await no.boundingBox())!;
+
+    if (isPhone(info)) await no.tap();
+    else await no.hover();
+
+    await expect(page.locator("#dodge-msg")).toHaveText("Okay, okay. Your call.");
+    await page.waitForTimeout(350);
+    expect(api.posts.length).toBe(0);
+    await expect(page.locator("#view-no")).toBeHidden();
+
+    // It moved, stayed inside the RSVP area and clear of the Yes button, and now stays put.
+    const moved = (await no.boundingBox())!;
+    const yesBox = (await yes.boundingBox())!;
+    const area = (await page.locator(".rsvp").boundingBox())!;
+    expect(moved.y).toBeGreaterThan(start.y + 40);
+    expect(moved.y).toBeGreaterThanOrEqual(yesBox.y + yesBox.height);
+    expect(moved.x).toBeGreaterThanOrEqual(area.x);
+    expect(moved.x + moved.width).toBeLessThanOrEqual(area.x + area.width + 1);
+    expect(moved.y + moved.height).toBeLessThanOrEqual(area.y + area.height + 1);
+    await expect(no).toBeEnabled();
+
+    if (isPhone(info)) await no.tap();
+    else await no.click();
+    await expect(page.getByRole("heading", { name: "You’ll be missed. Thanks for letting me know." })).toBeVisible();
+    expect(api.posts.length).toBe(1);
+    expect(api.posts[0]).toMatchObject({ name: "Asha Rao", status: "no" });
+    await expect(page.getByRole("button", { name: "Change my response" })).toBeVisible();
+    await expect(page.locator("#cal-google")).toBeHidden();
+    expect(await page.locator("#no-h").boundingBox()).not.toBeNull();
+    const still = (await no.boundingBox()) ?? moved;
+    expect(still).toBeTruthy();
+  });
+
+  test("keyboard and reduced-motion guests get a still decline button", async ({ page }) => {
+    const api = await mockApi(page);
+    await skipToInvite(page);
+    await page.locator("#rsvp-name").fill("Kiran");
+    await page.locator("#rsvp-no").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { name: "You’ll be missed. Thanks for letting me know." })).toBeFocused();
+    await expect(page.locator("#dodge-msg")).toHaveText("");
+    expect(api.posts.length).toBe(1);
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.getByRole("button", { name: "Change my response" }).click();
+    const no = page.locator("#rsvp-no");
+    const yes = page.locator("#rsvp-yes");
+    await no.scrollIntoViewIfNeeded();
+    const gap = async () => (await no.boundingBox())!.y - (await yes.boundingBox())!.y;
+    const before = await gap();
+    await no.hover();
+    await page.waitForTimeout(250);
+    expect(Math.abs((await gap()) - before)).toBeLessThan(1);
+    await expect(page.locator("#dodge-msg")).toHaveText("");
+  });
+
+  test("yes saves once, confirms and offers the calendar", async ({ page }, info) => {
+    const api = await mockApi(page);
+    api.delayMs = 300;
+    await skipToInvite(page);
+
+    // The name is required before anything is sent.
+    await page.locator("#rsvp-yes").click();
+    await expect(page.locator("#rsvp-name-err")).toBeVisible();
+    expect(api.posts.length).toBe(0);
+
+    await page.locator("#rsvp-name").fill("  Asha   Rao ");
+    await page.locator("#rsvp-size").selectOption("2");
+    // A double tap sends one request.
+    await page.locator("#rsvp-yes").dblclick();
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeFocused();
+    expect(api.posts.length).toBe(1);
+    expect(api.posts[0]).toMatchObject({ name: "Asha Rao", status: "yes", partySize: 2, character: null, publicName: null });
+    expect(String(api.posts[0].id)).toMatch(/^[0-9a-f-]{36}$/);
+    expect(String(api.posts[0].token)).toMatch(/^[0-9a-f]{64}$/);
+    await expect(page.locator("#yes-sum")).toHaveText("You’re down as Asha Rao, 2 people.");
+
+    const google = page.getByRole("link", { name: "Add to Google Calendar" });
+    await expect(google).toBeVisible();
+    const href = new URL((await google.getAttribute("href"))!);
+    expect(href.searchParams.get("dates")).toBe("20261115T093000Z/20261115T123000Z");
+    expect(href.searchParams.get("location")).toBe("Cubbon Park, Bengaluru");
+    const ics = page.getByRole("link", { name: "Download calendar file" });
+    await expect(ics).toHaveAttribute("href", "/jacob-birthday-2026.ics");
+    const file = await page.request.get("/jacob-birthday-2026.ics");
+    expect(file.ok()).toBe(true);
+    expect(file.headers()["content-type"]).toContain("text/calendar");
+    const icsText = await file.text();
+    expect(icsText).toContain("DTSTART:20261115T093000Z\r\n");
+    expect(icsText).toContain("DTEND:20261115T123000Z\r\n");
+    expect(icsText).toContain("LOCATION:Cubbon Park\\, Bengaluru\r\n");
+    await expect(page.getByRole("button", { name: "Change my response" })).toBeVisible();
+    await expect(page.locator("#count-badge")).toHaveText("2 coming");
+    await page.getByRole("heading", { name: "See you at the picnic" }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: info.outputPath("4-rsvp-yes.png") });
+  });
+
+  test("a failed save keeps the form, shows no confirmation, and the retry reuses the same response", async ({ page }) => {
+    const api = await mockApi(page);
+    api.failNext = 1;
+    await skipToInvite(page);
+    await page.locator("#rsvp-name").fill("Asha Rao");
+    await page.locator("#rsvp-size").selectOption("3");
+    await page.locator("#rsvp-yes").click();
+
+    await expect(page.locator("#rsvp-error")).toBeVisible();
+    await expect(page.locator("#rsvp-error")).toContainText("That didn’t save");
+    await expect(page.locator("#rsvp-name")).toHaveValue("Asha Rao");
+    await expect(page.locator("#rsvp-size")).toHaveValue("3");
+    await expect(page.locator("#view-yes")).toBeHidden();
+    await expect(page.locator("#count-badge")).toBeHidden();
+    await expect(page.locator("#park .guest")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+    expect(api.posts.length).toBe(2);
+    expect(api.posts[1].id).toBe(api.posts[0].id);
+    expect(api.posts[1].token).toBe(api.posts[0].token);
+  });
+
+  test("with the API unavailable the game and invitation still work", async ({ page }) => {
+    // No mock: the preview server has no /api routes.
+    await skipToInvite(page);
+    await expect(page.locator("#invite")).toContainText("Cubbon Park");
+    await page.locator("#rsvp-name").fill("Asha");
+    await page.locator("#rsvp-yes").click();
+    await expect(page.locator("#rsvp-error")).toBeVisible();
+    await expect(page.locator("#rsvp-name")).toHaveValue("Asha");
+    await expect(page.locator("#view-yes")).toBeHidden();
+  });
+
+  test("join the park, show a first name by choice, and leave when changing to no", async ({ page }, info) => {
+    const api = await mockApi(page);
+    await skipToInvite(page);
+    await page.locator("#rsvp-name").fill("Asha Rao");
+    await page.locator("#rsvp-yes").click();
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+
+    const join = page.getByRole("button", { name: "Join the park" });
+    await expect(join).toBeDisabled();
+    await expect(page.locator("#join-show")).not.toBeChecked();
+    await page.getByRole("radio", { name: /Fern/ }).check({ force: true });
+    await join.click();
+    await expect(page.locator("#park .guest")).toHaveCount(1);
+    await expect(page.locator("#park .guest-name")).toHaveCount(0);
+    expect(api.posts[1]).toMatchObject({ character: "fern", publicName: null, status: "yes" });
+
+    // Opt in to showing the first name.
+    await page.locator("#join-show").check();
+    await page.getByRole("button", { name: "Update my character" }).click();
+    await expect(page.locator("#park .guest-name")).toHaveText("Asha");
+    expect(api.posts[2]).toMatchObject({ character: "fern", publicName: "Asha" });
+    expect(api.posts[2].id).toBe(api.posts[0].id);
+    await page.waitForTimeout(900);
+    await page.screenshot({ path: info.outputPath("5-joined.png") });
+
+    // Changing to no removes the character from the gathering.
+    await page.getByRole("button", { name: "Change my response" }).click();
+    await page.locator("#rsvp-no").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { name: "You’ll be missed. Thanks for letting me know." })).toBeVisible();
+    await expect(page.locator("#park .guest")).toHaveCount(0);
+    await expect(page.locator("#count-badge")).toBeHidden();
+  });
+});
+
+test.describe("return visits", () => {
+  test("a returning guest lands on the invitation, and Play again keeps the RSVP", async ({ page }, info) => {
+    const api = await mockApi(page);
+    await open(page);
+    await findJacob(page, info);
+    await page.locator("#rsvp-name").fill("Asha Rao");
+    await page.locator("#rsvp-yes").click();
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+    const saved = await page.evaluate(() => localStorage.getItem("fj.rsvp.v1"));
+
+    await page.reload();
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "invite");
+    await expect(page.locator("#park")).toHaveAttribute("data-cover", "gone");
+    await expect(page.locator("#invite")).toContainText("Sunday 15 November 2026");
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Play again" }).click();
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "searching");
+    await expect(page.locator("#park")).toHaveAttribute("data-cover", "covering");
+    await expect(page.locator("#invite")).toBeHidden();
+    await expect(page.locator("#park .guest")).toHaveCount(0);
+
+    await findJacob(page, info);
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("fj.rsvp.v1"))).toBe(saved);
+    expect(api.posts.length).toBe(1);
+  });
+});
+
+test.describe("fallbacks", () => {
+  test("if the artwork fails to load, a retry and a readable invitation appear", async ({ page }) => {
+    await page.route(/\/assets\/park-.*\.js$/, (route) => route.abort());
+    await page.goto("/");
+    await expect(page.locator("#app")).toHaveAttribute("data-state", "invite");
+    await expect(page.getByRole("button", { name: "Try the game again" })).toBeVisible();
+    await expect(page.locator("#invite")).toContainText("Sunday 15 November 2026");
+    await expect(page.locator("#invite")).toContainText("Cubbon Park");
+    await expect(page.locator("#rsvp-yes")).toBeVisible();
+  });
+
+  test("works when localStorage is blocked", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "localStorage", {
+        get() {
+          throw new Error("blocked");
+        },
+      });
+    });
+    await mockApi(page);
+    await skipToInvite(page);
+    await page.locator("#rsvp-name").fill("Asha");
+    await page.locator("#rsvp-yes").click();
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+  });
+
+  test("host page asks for the key and never lists anything without it", async ({ page }) => {
+    await page.goto("/host.html");
+    await expect(page.locator("#status")).toHaveText("Enter your host key to see responses.");
+    await expect(page.locator("#table-wrap")).toBeHidden();
+    await page.route("**/api/host?key=*", (route) =>
+      route.fulfill({
+        json: {
+          totalComing: 3,
+          yesCount: 1,
+          noCount: 1,
+          responses: [
+            { name: "<b>Asha</b>", status: "yes", partySize: 3, character: "fern", publicName: null, updatedAt: "2026-11-13T10:00:00Z" },
+            { name: "Ben", status: "no", partySize: 1, character: null, publicName: null, updatedAt: "2026-11-13T11:00:00Z" },
+          ],
+        },
+      }),
+    );
+    await page.locator("#key-input").fill("secret");
+    await page.getByRole("button", { name: "Show responses" }).click();
+    await expect(page.locator("#total")).toHaveText("3 people coming in total");
+    await expect(page.locator("#rows tr")).toHaveCount(2);
+    await expect(page.locator("#rows tr").first()).toContainText("<b>Asha</b>");
+  });
+});

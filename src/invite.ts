@@ -6,7 +6,7 @@
 import { CHARACTER_IDS, EVENT, LIMITS, formatEventDate, formatEventTime, type CharacterId } from "./event.config.ts";
 import { ApiError, saveRsvp, type Attendees, type RsvpPayload } from "./api.ts";
 import { GUESTS, guestIcon } from "./art.ts";
-import { googleCalendarUrl, icsDataHref, icsFileName } from "./calendar.ts";
+import { googleCalendarUrl, icsHref } from "./calendar.ts";
 import { clearRsvp, loadRsvp, newIdentity, storeRsvp, type LocalRsvp } from "./storage.ts";
 
 export interface InviteHooks {
@@ -121,7 +121,7 @@ export class Invite {
         <p id="yes-sum" class="muted"></p>
         <div class="cal">
           <a id="cal-google" class="btn btn--primary" href="${esc(googleCalendarUrl())}" target="_blank" rel="noopener">Add to Google Calendar</a>
-          <a id="cal-ics" class="btn btn--ghost" href="${esc(icsDataHref())}" download="${esc(icsFileName())}">Download calendar file</a>
+          <a id="cal-ics" class="btn btn--ghost" href="${esc(icsHref())}" type="text/calendar">Download calendar file</a>
         </div>
         <p class="muted small">If plans change, I’ll tell you on WhatsApp. A saved calendar entry won’t update by itself.</p>
 

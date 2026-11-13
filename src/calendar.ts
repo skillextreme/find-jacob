@@ -78,6 +78,7 @@ export function icsFileName(ev: EventConfig = EVENT): string {
   return `${ev.id}.ics`;
 }
 
-export function icsDataHref(ev: EventConfig = EVENT): string {
-  return `data:text/calendar;charset=utf-8,${encodeURIComponent(buildIcs(ev))}`;
+/** The calendar file is published next to the site at build time (see vite.config.ts). */
+export function icsHref(ev: EventConfig = EVENT): string {
+  return `/${icsFileName(ev)}`;
 }
