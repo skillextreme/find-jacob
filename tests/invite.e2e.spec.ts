@@ -113,6 +113,7 @@ async function mockApi(page: Page): Promise<MockApi> {
               character: body.character,
               displayName: String(body.name).split(" ")[0],
               ...(body.pos ? { pos: body.pos } : {}),
+              ...(body.secrets ? { secrets: body.secrets } : {}),
               ...((body.companions as unknown[]).length ? { pets: body.companions } : {}),
             },
           ]
@@ -542,7 +543,7 @@ test.describe("rsvp", () => {
   });
 
   test("the park is lively after the reveal and hides a few secrets", async ({ page }) => {
-    await mockApi(page);
+    const api = await mockApi(page);
     await skipToInvite(page);
     // Jacob wears his party cap in the park and in the portrait.
     expect(await page.locator("#it-jacob").innerHTML()).toContain("M-14,-144 L1,-186");
@@ -564,6 +565,21 @@ test.describe("rsvp", () => {
     // Found secrets are remembered.
     await page.reload();
     await expect(page.locator("#egg-chip")).toHaveText("Secrets found: 2 of 7");
+
+    // The leaderboard: empty until someone who said yes has found a secret.
+    await expect(page.locator("#leaders")).toBeHidden();
+    await page.locator("#rsvp-name").fill("Asha Rao");
+    await page.locator("#rsvp-yes").click();
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+    expect(api.posts[0].secrets).toBe(2);
+    await expect(page.locator("#leaders li")).toHaveText(["Asha2 of 7"]);
+    // Finding another one updates the board without asking the guest to do anything.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator("#it-duck").click({ force: true });
+    await expect(page.locator("#egg-chip")).toHaveText("Secrets found: 3 of 7");
+    await expect(page.locator("#leaders li")).toHaveText(["Asha3 of 7"]);
+    expect(api.posts[1]).toMatchObject({ secrets: 3, status: "yes" });
+    expect(api.posts[1].id).toBe(api.posts[0].id);
   });
 });
 

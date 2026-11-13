@@ -7,6 +7,7 @@ export interface PublicGuest {
   displayName?: string;
   pos?: [number, number];
   pets?: Companion[];
+  secrets?: number;
 }
 export interface Attendees {
   totalComing: number;
@@ -22,6 +23,7 @@ export interface RsvpPayload {
   publicName: string | null;
   companions: Companion[];
   pos: [number, number] | null;
+  secrets: number;
 }
 export interface RsvpResult {
   ok: true;

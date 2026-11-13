@@ -7,7 +7,7 @@ import { EVENT, LIMITS, LOOK_PARTS, formatEventDate, formatEventTime, parseLook,
 import { ApiError, saveRsvp, type Attendees, type RsvpPayload } from "./api.ts";
 import { BOTTOMS, HAIR_COLORS, HAIR_STYLES, PET_COLORS, PET_KINDS, SKINS, TOPS, guestIcon, petIcon } from "./art.ts";
 import { googleCalendarUrl, icsHref } from "./calendar.ts";
-import { clearRsvp, loadRsvp, newIdentity, storeRsvp, type LocalRsvp } from "./storage.ts";
+import { clearRsvp, loadEggs, loadRsvp, newIdentity, storeRsvp, type LocalRsvp } from "./storage.ts";
 
 export interface InviteHooks {
   announce(message: string): void;
@@ -93,6 +93,10 @@ export class Invite {
 
     <section class="rsvp" aria-labelledby="rsvp-h">
       <p id="rsvp-count" class="rsvp__who" hidden></p>
+      <div id="leaders" class="leaders" hidden>
+        <p class="leaders__title">Secret finders <span class="muted">There are ${LIMITS.secretsTotal} hidden in the park. Tap around.</span></p>
+        <ol id="leaders-list"></ol>
+      </div>
       <form id="rsvp-form" novalidate>
         <h3 id="rsvp-h">Are you coming?</h3>
         <div class="field">
@@ -417,6 +421,37 @@ export class Invite {
   }
 
   /** Called when the guest drops their character somewhere new in the park. */
+  /** Sends the latest secrets count for the leaderboard. Only guests who said yes are on it. */
+  async saveSecrets(): Promise<void> {
+    const rec = loadRsvp();
+    if (!rec?.saved || rec.status !== "yes") return;
+    if (this.saving) {
+      // Something else is saving; try again shortly so the count isn't lost.
+      window.setTimeout(() => void this.saveSecrets(), 1500);
+      return;
+    }
+    this.pending = { kind: "pos", record: rec, payload: this.toPayload(rec) };
+    await this.send(true);
+  }
+
+  /** Top secret finders, as a tiny leaderboard. */
+  setLeaders(rows: { name: string; secrets: number }[]): void {
+    const box = this.$("#leaders");
+    const top = rows.filter((r) => r.secrets > 0).sort((a, b) => b.secrets - a.secrets).slice(0, 5);
+    box.hidden = top.length === 0;
+    const list = this.$("#leaders-list");
+    list.replaceChildren();
+    for (const r of top) {
+      const li = document.createElement("li");
+      const name = document.createElement("span");
+      name.textContent = r.name; // plain text
+      const score = document.createElement("b");
+      score.textContent = r.secrets >= LIMITS.secretsTotal ? `all ${LIMITS.secretsTotal}!` : `${r.secrets} of ${LIMITS.secretsTotal}`;
+      li.append(name, score);
+      list.append(li);
+    }
+  }
+
   async savePosition(pos: [number, number]): Promise<void> {
     const rec = loadRsvp();
     if (this.saving || !rec?.saved || rec.status !== "yes") return;
@@ -527,11 +562,12 @@ export class Invite {
       publicName: r.status === "yes" && r.character ? firstName(r.name) || null : null,
       companions: r.status === "yes" ? r.companions.slice(0, Math.max(0, r.partySize - 1)) : [],
       pos: r.pos,
+      secrets: Math.min(LIMITS.secretsTotal, loadEggs().size),
     };
   }
 
   /** Sends the pending request. Retries reuse the same id and token, so they can't create a duplicate. */
-  private async send(): Promise<void> {
+  private async send(quiet = false): Promise<void> {
     const job = this.pending;
     if (!job || this.saving) return;
     this.setError(null);
@@ -545,7 +581,9 @@ export class Invite {
       this.setSaving(false);
       if (job.kind !== "pos") this.showSaved(record, job.kind === "rsvp");
       this.hooks.onAttendees(res.attendees, res.you, job.kind === "rsvp" && record.status === "yes");
-      if (job.kind === "pos") {
+      if (quiet) {
+        /* a background save: nothing to say */
+      } else if (job.kind === "pos") {
         this.hooks.announce("Your character has moved.");
       } else if (job.kind === "rsvp") {
         this.hooks.announce(record.status === "yes" ? "Saved. See you at the picnic. Your character has joined the park." : "Saved. You’ll be missed. Thanks for letting me know.");
@@ -558,6 +596,7 @@ export class Invite {
       const err = e instanceof ApiError ? e : new ApiError("server", "Unexpected error");
       this.setSaving(false);
       // A failed save never shows a confirmation and never adds a character.
+      if (quiet) return;
       if (job.kind === "rsvp") this.setError(err);
       else this.setJoinError(err);
     }

@@ -104,6 +104,8 @@ export const LIMITS = {
   nameMax: 40,
   publicNameMax: 20,
   companionNameMax: 20,
+  /** Hidden secrets in the park (see src/eggs.ts). */
+  secretsTotal: 7,
   /** Individual characters drawn in the park at once. The count stays accurate above this. */
   maxVisibleGuests: 24,
 } as const;

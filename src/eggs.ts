@@ -2,29 +2,23 @@
  * Hidden extras in the revealed park. Each one is a tap on something in the scene.
  * They only work after the reveal, never during the search.
  */
+import { LIMITS } from "./event.config.ts";
 import type { Park } from "./park.ts";
+import { loadEggs, storeEggs } from "./storage.ts";
 
-const KEY = "fj.eggs.v1";
-const TOTAL = 7;
+const TOTAL = LIMITS.secretsTotal;
 
 interface Hooks {
   isRevealed(): boolean;
   reducedMotion(): boolean;
   announce(message: string): void;
   chip: HTMLElement;
-}
-
-function loadFound(): Set<string> {
-  try {
-    const raw = JSON.parse(window.localStorage.getItem(KEY) ?? "[]");
-    return new Set(Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : []);
-  } catch {
-    return new Set();
-  }
+  /** A new secret was found: the count for the leaderboard has changed. */
+  onFound(count: number): void;
 }
 
 export function initEggs(park: Park, hooks: Hooks): { refresh(): void } {
-  const found = loadFound();
+  const found = loadEggs();
   const svg = park.svg;
 
   const refresh = () => {
@@ -36,12 +30,9 @@ export function initEggs(park: Park, hooks: Hooks): { refresh(): void } {
     hooks.announce(message);
     if (found.has(id)) return;
     found.add(id);
-    try {
-      window.localStorage.setItem(KEY, JSON.stringify([...found]));
-    } catch {
-      /* fine without storage */
-    }
+    storeEggs(found);
     refresh();
+    hooks.onFound(found.size);
   };
 
   /** Replays a one-shot CSS animation class. */

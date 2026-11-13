@@ -164,3 +164,15 @@ test("admin key check", () => {
   expect(adminKeyMatches(null, "secret phrase")).toBe(false);
   expect(adminKeyMatches("anything", undefined)).toBe(false);
 });
+
+test("secrets count is stored for the leaderboard, validated, and never goes down", async () => {
+  const kv = memoryKV();
+  await handleRsvp({ ...solo, secrets: 4 }, "1.1.1.1", kv);
+  expect((await publicAttendees(kv)).guests[0].secrets).toBe(4);
+  await handleRsvp({ ...solo, secrets: 2 }, "1.1.1.1", kv);
+  await handleRsvp(solo, "1.1.1.1", kv);
+  expect((await publicAttendees(kv)).guests[0].secrets).toBe(4);
+  for (const secrets of [8, -1, 2.5, "7"]) {
+    expect((await handleRsvp({ ...solo, secrets }, "1.1.1.1", kv)).body).toEqual({ error: "invalid_secrets" });
+  }
+});

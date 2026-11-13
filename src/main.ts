@@ -90,6 +90,7 @@ function showAttendees(arrive: "all" | "self" | "none"): void {
   invite?.setCount(attendees ? total : null, (attendees?.guests ?? []).flatMap((g) =>
     g.displayName ? [g.pets?.length ? `${g.displayName} (with ${g.pets.map((p) => p.name).join(" and ")})` : g.displayName] : [],
   ));
+  invite?.setLeaders((attendees?.guests ?? []).flatMap((g) => (g.displayName && g.secrets ? [{ name: g.displayName, secrets: g.secrets }] : [])));
   if (!park) return;
   park.setGuests(attendees?.guests ?? [], you, arrive === "all" ? "all" : arrive === "self" ? you : null);
 }
@@ -203,7 +204,7 @@ async function boot(): Promise<void> {
       onRevealed: () => enterInvite(true),
     });
     park.onGuestDrop = (pos) => void invite?.savePosition(pos);
-    eggs = initEggs(park, { isRevealed: () => app.dataset.state === "invite", reducedMotion, announce, chip: eggChip });
+    eggs = initEggs(park, { isRevealed: () => app.dataset.state === "invite", reducedMotion, announce, chip: eggChip, onFound: () => void invite?.saveSecrets() });
     layout();
     // Give the web font a moment, but never hold the game up for it.
     await Promise.race([document.fonts?.ready ?? Promise.resolve(), new Promise((r) => window.setTimeout(r, 1200))]);

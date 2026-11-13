@@ -26,6 +26,8 @@ export interface StoredResponse {
   companions?: Companion[];
   /** Where the guest put their character, as two 0–1 numbers. */
   pos?: [number, number] | null;
+  /** How many park secrets this guest has found (reported by their device). */
+  secrets?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +44,7 @@ export interface PublicGuest {
   displayName?: string;
   pos?: [number, number];
   pets?: Companion[];
+  secrets?: number;
 }
 
 export interface Reply {
@@ -90,6 +93,7 @@ function toPublic(rows: StoredResponse[], forId?: string): { attendees: PublicAt
     const g: PublicGuest = { key: guestKey(r.id), character: normalizeLook(r.character) ?? "1.2.0.1.0" };
     if (r.publicName) g.displayName = r.publicName;
     if (r.pos) g.pos = r.pos;
+    if (r.secrets) g.secrets = r.secrets;
     if (r.companions?.length) g.pets = r.companions;
     guests.push(g);
   }
@@ -156,6 +160,14 @@ export async function handleRsvp(input: unknown, ip: string, kv: KV, now = Date.
     pos = [Math.round((p[0] as number) * 1000) / 1000, Math.round((p[1] as number) * 1000) / 1000];
   }
 
+  let secrets = 0;
+  if (b.secrets !== null && b.secrets !== undefined) {
+    if (typeof b.secrets !== "number" || !Number.isInteger(b.secrets) || b.secrets < 0 || b.secrets > LIMITS.secretsTotal) {
+      return { status: 400, body: { error: "invalid_secrets" } };
+    }
+    secrets = b.secrets;
+  }
+
   // Everyone who says yes appears in the park with a character and their first name. It is not optional:
   // a missing character is filled in at random, and the public name always comes from the name given.
   let publicName: string | null = null;
@@ -184,6 +196,8 @@ export async function handleRsvp(input: unknown, ip: string, kv: KV, now = Date.
     publicName,
     companions,
     pos,
+    // A count never goes down, so a second device or cleared storage can't undo it.
+    secrets: Math.max(secrets, existing?.secrets ?? 0),
     createdAt: existing?.createdAt ?? stamp,
     updatedAt: stamp,
   };

@@ -51,6 +51,22 @@ export function markFound(): void {
   write(FOUND_KEY, "1");
 }
 
+const EGGS_KEY = "fj.eggs.v1";
+
+/** Ids of the park secrets found on this device. */
+export function loadEggs(): Set<string> {
+  try {
+    const raw = JSON.parse(read(EGGS_KEY) ?? "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function storeEggs(found: Set<string>): void {
+  write(EGGS_KEY, JSON.stringify([...found]));
+}
+
 let memory: LocalRsvp | null = null;
 
 export function loadRsvp(): LocalRsvp | null {

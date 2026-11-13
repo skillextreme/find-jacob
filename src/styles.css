@@ -483,6 +483,33 @@ html.is-searching body {
   margin-bottom: 4px;
   font-weight: 700;
 }
+.leaders {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: var(--butter);
+  border-radius: 12px;
+}
+.leaders[hidden] {
+  display: none;
+}
+.leaders__title {
+  margin: 0 0 4px;
+  font-weight: 700;
+}
+.leaders__title .muted {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+.leaders ol {
+  margin: 0;
+  padding-left: 1.4em;
+}
+.leaders li > span {
+  display: inline-block;
+  min-width: 7em;
+  margin-right: 8px;
+}
 .field__title {
   margin: 0 0 6px;
   font-weight: 700;

@@ -20,6 +20,7 @@ export interface PublicGuest {
   pos?: [number, number];
   /** People they are bringing, drawn as named pets. */
   pets?: Companion[];
+  secrets?: number;
 }
 
 /** The part of each composition where guests may stand (as fractions of the scene). */
