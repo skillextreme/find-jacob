@@ -346,6 +346,21 @@ html.is-searching body {
   display: flex;
   align-items: center;
 }
+.chip--eggs {
+  right: 12px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+  background: var(--butter);
+}
+@media (min-width: 880px) and (orientation: landscape) {
+  .chip--eggs {
+    right: auto;
+    left: max(12px, env(safe-area-inset-left));
+    bottom: 64px;
+  }
+}
 .chip[hidden] {
   display: none;
 }
@@ -467,6 +482,13 @@ html.is-searching body {
   display: block;
   margin-bottom: 4px;
   font-weight: 700;
+}
+.field__title {
+  margin: 0 0 6px;
+  font-weight: 700;
+}
+#rsvp-companions input + input {
+  margin-top: 8px;
 }
 .field label .muted {
   font-weight: 400;
@@ -627,62 +649,106 @@ html.is-searching body {
 .join p {
   margin: 0 0 10px;
 }
-.join__grid {
+.look {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 6px;
+  grid-template-columns: 84px 1fr;
+  gap: 12px;
+  align-items: start;
 }
-.char {
-  position: relative;
-  display: block;
-  cursor: pointer;
+.look__preview {
+  position: sticky;
+  top: 8px;
+  padding: 6px 4px 0;
+  background: var(--butter);
+  border: 2.5px solid var(--line);
+  border-radius: 14px;
 }
-.char input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.char__art {
-  display: block;
-  padding: 4px 2px 0;
-  background: var(--cream);
-  border: 2.5px solid transparent;
-  border-radius: 12px;
-}
-.char__art svg {
+.look__preview svg,
+.pet__art svg {
   display: block;
   width: 100%;
   height: auto;
-  max-height: 96px;
 }
-.char input:checked + .char__art {
-  background: var(--butter);
-  border-color: var(--line);
+.look__row {
+  margin-bottom: 8px;
 }
-.char input:focus-visible + .char__art {
-  outline: 3px solid var(--ink);
-  outline-offset: 2px;
+.look__label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
 }
-.check {
+.look__set {
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  margin: 12px 0;
-  font-size: 0.95rem;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sw {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: var(--c);
+  border: 2px solid rgba(43, 90, 69, 0.45);
+  border-radius: 50%;
   cursor: pointer;
 }
-.check input {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  margin: 1px 0 0;
-  accent-color: var(--ink);
+.chipbtn {
+  min-height: 34px;
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: #fffdf5;
+  border: 2px solid rgba(43, 90, 69, 0.45);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.sw[aria-pressed="true"],
+.chipbtn[aria-pressed="true"] {
+  border-color: var(--ink);
+  box-shadow:
+    0 0 0 2px #fffdf5,
+    0 0 0 4.5px var(--ink);
+}
+.chipbtn[aria-pressed="true"] {
+  background: var(--butter);
+  font-weight: 700;
+}
+.sw:focus-visible,
+.chipbtn:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+.pets {
+  margin-top: 6px;
+}
+.petrow {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding-top: 10px;
+  margin-top: 6px;
+  border-top: 2px dashed rgba(43, 90, 69, 0.3);
+}
+.pet__art {
+  padding: 6px;
+  background: var(--cream);
+  border-radius: 14px;
+}
+.pet__name {
+  margin: 0 0 6px !important;
+  font-weight: 700;
+}
+.petrow .look__set + .look__set {
+  margin-top: 6px;
 }
 .join__actions {
+  margin-top: 12px;
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -867,10 +933,138 @@ html.is-searching body {
 [data-state="invite"] .tuft:hover .tuft-blades {
   animation: rustle 0.25s ease-in-out 4 alternate;
 }
-[data-state="invite"] .guest:hover .guest-in,
-[data-state="invite"] .walker:hover .figure,
-[data-state="invite"] .duck:hover .duck-body {
+/* After the reveal the park comes alive: the other park-goers wander and play, and guests wave. */
+.roam,
+.dog-roam,
+.pet-tail,
+.pet-body,
+.bush-gnome,
+.fish,
+.sun-shades {
+  transform-origin: 0 0;
+}
+[data-state="invite"] .roam-jog {
+  animation: roam 13s linear infinite;
+  --reach: 150px;
+}
+[data-state="invite"] .roam-stroll {
+  animation: roam 30s linear infinite;
+  --reach: 64px;
+}
+[data-state="invite"] .roam-kite {
+  animation: roam 11s ease-in-out infinite;
+  --reach: 46px;
+}
+[data-state="invite"] .dog-roam {
+  animation: roam 19s ease-in-out infinite;
+  --reach: 58px;
+}
+[data-state="invite"] .duck .duck-body {
+  animation: roam 15s ease-in-out infinite;
+  --reach: 22px;
+}
+[data-state="invite"] .roam-jog .figure {
+  animation: bounce 0.32s ease-in-out infinite alternate;
+}
+[data-state="invite"] .roam-stroll .figure,
+[data-state="invite"] .roam-kite .figure {
+  animation: bounce 0.6s ease-in-out infinite alternate;
+}
+[data-state="invite"] .dog .dog-tail {
+  animation: wag 0.28s ease-in-out infinite alternate;
+}
+[data-state="invite"] .guest .arm-r {
+  animation: wave-idle 7s ease-in-out infinite;
+  animation-delay: var(--wd, 0s);
+}
+[data-state="invite"] .pet-tail {
+  animation: wag 0.4s ease-in-out infinite alternate;
+}
+[data-state="invite"] .pet-body {
+  animation: pet-hop 3.4s ease-in-out infinite;
+  animation-delay: var(--wd, 0s);
+}
+[data-state="invite"] .guest:not(.you):hover .guest-in {
   animation: hop 0.4s ease-out;
+}
+
+/* Your own character: marked, and yours to drag. */
+.guest.you {
+  cursor: grab;
+  touch-action: none;
+}
+.guest.you.dragging {
+  cursor: grabbing;
+}
+.guest.you.dragging .guest-in {
+  transform: translateY(-8px);
+}
+.you-ring {
+  animation: ring 1.6s ease-in-out infinite alternate;
+}
+.tags.arrive {
+  animation: fade 0.5s 0.4s both;
+}
+.pet-name {
+  font-size: 19px;
+}
+
+/* Easter eggs. */
+[data-state="invite"] :is(#sun, .flutter, #it-duck, #it-dog, #it-jacob, .balloon, #it-bush2, #it-pond) {
+  cursor: pointer;
+}
+.sun-shades {
+  opacity: 0;
+  transform: translateY(-40px);
+  transition:
+    opacity 0.25s,
+    transform 0.35s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+.sun-cool .sun-shades {
+  opacity: 1;
+  transform: none;
+}
+.bush-gnome {
+  transform: translateY(46px);
+}
+.flutter.loop .butterfly {
+  transform-origin: 0 0;
+  animation: spin-once 0.7s ease-in-out;
+}
+.gnome-bush.peek .bush-gnome {
+  animation: gnome 2.6s ease-in-out;
+}
+.gnome-bush.peek .bush-leaves {
+  animation: rustle 0.3s ease-in-out 4 alternate;
+}
+.fish {
+  opacity: 0;
+}
+#it-pond.splash .fish {
+  animation: fish 1.4s ease-in-out;
+}
+.balloon.away {
+  animation: away 4.2s ease-in-out !important;
+}
+[data-state="invite"] .dog.spin .dog-roam {
+  animation: spin-once 0.8s ease-in-out;
+}
+.pop {
+  font-family: inherit;
+  font-weight: 700;
+  fill: var(--ink);
+  stroke: #fffdf5;
+  stroke-width: 5px;
+  stroke-linejoin: round;
+  paint-order: stroke;
+  pointer-events: none;
+  animation: pop-up 1.4s ease-out both;
+}
+.confetti {
+  pointer-events: none;
+}
+.confetti .bit {
+  animation: confetti 1.5s cubic-bezier(0.2, 0.7, 0.4, 1) both;
 }
 
 .guest.arrive .guest-in {
@@ -879,9 +1073,6 @@ html.is-searching body {
 }
 #labels {
   pointer-events: none;
-}
-.guest-name.arrive {
-  animation: fade 0.5s 0.4s both;
 }
 .guest-name {
   font-family: inherit;
@@ -894,6 +1085,118 @@ html.is-searching body {
   paint-order: stroke;
 }
 
+@keyframes roam {
+  0%,
+  50%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(var(--reach));
+  }
+  75% {
+    transform: translateX(calc(var(--reach) * -1));
+  }
+}
+@keyframes bounce {
+  to {
+    transform: translateY(-5px);
+  }
+}
+@keyframes pet-hop {
+  0%,
+  12%,
+  100% {
+    transform: translateY(0);
+  }
+  6% {
+    transform: translateY(-9px);
+  }
+}
+@keyframes ring {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes gnome {
+  0%,
+  100% {
+    transform: translateY(46px);
+  }
+  20%,
+  80% {
+    transform: translateY(-8px);
+  }
+}
+@keyframes fish {
+  0% {
+    opacity: 0;
+    transform: translate(-50px, 0) rotate(-40deg);
+  }
+  15% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+    transform: translate(0, -70px) rotate(0deg);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(50px, 0) rotate(40deg);
+  }
+}
+@keyframes away {
+  0%,
+  100% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  45% {
+    transform: translate(60px, -420px);
+    opacity: 0;
+  }
+  55% {
+    transform: translate(-40px, -420px);
+    opacity: 0;
+  }
+}
+@keyframes spin-once {
+  to {
+    transform: rotate(360deg) translateY(-6px);
+  }
+}
+@keyframes pop-up {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-46px);
+  }
+}
+@keyframes confetti {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--tx), calc(var(--ty) + 150px)) rotate(var(--rot));
+  }
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1090,4 +1393,8 @@ html.is-searching body {
   .spinner {
     animation: none;
   }
+}
+
+[data-state="invite"] .duck.react .duck-body {
+  animation: waddle 0.36s ease-in-out 4 alternate;
 }

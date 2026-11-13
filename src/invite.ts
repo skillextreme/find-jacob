@@ -3,9 +3,9 @@
  * "join the park" character picker. All event text comes from the config and all
  * guest-entered text is written with textContent, never as markup.
  */
-import { CHARACTER_IDS, EVENT, LIMITS, formatEventDate, formatEventTime, type CharacterId } from "./event.config.ts";
+import { EVENT, LIMITS, LOOK_PARTS, formatEventDate, formatEventTime, parseLook, parsePet, randomLook, randomPet, type Companion } from "./event.config.ts";
 import { ApiError, saveRsvp, type Attendees, type RsvpPayload } from "./api.ts";
-import { GUESTS, guestIcon } from "./art.ts";
+import { BOTTOMS, HAIR_COLORS, HAIR_STYLES, PET_COLORS, PET_KINDS, SKINS, TOPS, guestIcon, petIcon } from "./art.ts";
 import { googleCalendarUrl, icsHref } from "./calendar.ts";
 import { clearRsvp, loadRsvp, newIdentity, storeRsvp, type LocalRsvp } from "./storage.ts";
 
@@ -36,7 +36,9 @@ export class Invite {
   private fleeing = false;
   private taunt = 0;
   private lastPointer: { type: string; at: number } | null = null;
-  private pending: { payload: RsvpPayload; record: LocalRsvp; kind: "rsvp" | "join" } | null = null;
+  private pending: { payload: RsvpPayload; record: LocalRsvp; kind: "rsvp" | "join" | "pos" } | null = null;
+  private draftLook: number[] = [1, 2, 0, 1, 0];
+  private draftPets: Companion[] = [];
 
   constructor(
     private root: HTMLElement,
@@ -72,11 +74,6 @@ export class Invite {
       ? `<a class="btn btn--small" id="map-link" href="${esc(EVENT.mapUrl)}" target="_blank" rel="noopener">Open map</a>`
       : "";
     const sizes = Array.from({ length: EVENT.maxPartySize }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
-    const chars = CHARACTER_IDS.map(
-      (id) =>
-        `<label class="char"><input type="radio" name="character" value="${id}" /><span class="char__art">${guestIcon(id)}</span><span class="sr-only">${esc(GUESTS[id].label)}</span></label>`,
-    ).join("");
-
     return `
 <div class="card">
   <div class="card__trim" aria-hidden="true"></div>
@@ -107,12 +104,14 @@ export class Invite {
           <label for="rsvp-size">How many of you? <span class="muted">Including you.</span></label>
           <select id="rsvp-size" name="partySize">${sizes}</select>
         </div>
+        <div id="rsvp-companions" class="field" hidden></div>
+        <p id="rsvp-comp-err" class="field__err" hidden>Add a name for everyone you’re bringing. They each get a pet in the park.</p>
         <div class="rsvp__actions" id="rsvp-actions">
           <button type="button" id="rsvp-yes" class="btn btn--primary">I’m coming</button>
           <button type="button" id="rsvp-no" class="btn btn--ghost">Can’t make it</button>
           <p id="dodge-msg" class="rsvp__dodge" aria-live="polite"></p>
         </div>
-        <p class="muted small rsvp__public">Saying yes adds a character with your first name to the park, where everyone invited can see who’s coming.</p>
+        <p class="muted small rsvp__public">Saying yes adds a character with your first name to the park, where everyone invited can see who’s coming. Anyone you bring shows up beside you as a named pet.</p>
         <p id="rsvp-saving" class="muted" role="status" hidden>Saving…</p>
         <div id="rsvp-error" class="notice notice--error" role="alert" hidden>
           <p id="rsvp-error-text"></p>
@@ -132,8 +131,16 @@ export class Invite {
 
         <fieldset class="join" id="join">
           <legend>You’re in the park</legend>
-          <p class="small">This character is standing at the picnic with your first name (<b id="join-first"></b>), where everyone invited can see it. Tap another one to change it.</p>
-          <div class="join__grid">${chars}</div>
+          <p class="small">Your character is at the picnic with your first name (<b id="join-first"></b>), where everyone invited can see it. <strong>Drag it in the park</strong> to stand wherever you like.</p>
+          <div class="look">
+            <div class="look__preview" id="look-preview"></div>
+            <div class="look__opts" id="look-opts"></div>
+          </div>
+          <div id="pets" class="pets"></div>
+          <div class="join__actions">
+            <button type="button" id="look-save" class="btn btn--primary" disabled>Save my look</button>
+            <button type="button" id="look-shuffle" class="btn btn--small">Shuffle</button>
+          </div>
           <p id="join-status" class="muted small" role="status"></p>
           <div id="join-error" class="notice notice--error" role="alert" hidden>
             <p id="join-error-text"></p>
@@ -211,13 +218,32 @@ export class Invite {
     this.$("#change-yes").addEventListener("click", () => this.showForm(true));
     this.$("#change-no").addEventListener("click", () => this.showForm(true));
 
-    // Everyone who says yes is in the park. Tapping another character changes theirs straight away.
-    this.root.querySelectorAll<HTMLInputElement>('input[name="character"]').forEach((r) =>
-      r.addEventListener("change", () => {
-        const picked = this.selectedCharacter();
-        if (picked) void this.join(picked);
-      }),
-    );
+    // Plus-ones: one name field per extra person.
+    this.$("#rsvp-size").addEventListener("change", () => this.renderCompanionFields());
+    this.$("#rsvp-companions").addEventListener("input", () => {
+      this.$("#rsvp-comp-err").hidden = true;
+    });
+
+    // Look and pet customiser. Nothing is sent until "Save my look".
+    this.$("#join").addEventListener("click", (e) => {
+      const b = (e.target as Element).closest<HTMLButtonElement>("button[data-part], button[data-pet]");
+      if (!b || this.saving) return;
+      if (b.dataset.part !== undefined) {
+        this.draftLook[Number(b.dataset.part)] = Number(b.dataset.val);
+      } else {
+        const pet = this.draftPets[Number(b.dataset.pet)];
+        const nums = parsePet(pet.pet) ?? [0, 0];
+        nums[Number(b.dataset.slot)] = Number(b.dataset.val);
+        pet.pet = nums.join(".");
+      }
+      this.renderLook(true);
+    });
+    this.$("#look-shuffle").addEventListener("click", () => {
+      this.draftLook = parseLook(randomLook())!;
+      for (const pet of this.draftPets) pet.pet = randomPet();
+      this.renderLook(true);
+    });
+    this.$("#look-save").addEventListener("click", () => void this.saveLook());
     this.$("#join-retry").addEventListener("click", () => void this.send());
   }
 
@@ -292,6 +318,7 @@ export class Invite {
       this.$<HTMLInputElement>("#rsvp-name").value = rec.name;
       this.$<HTMLSelectElement>("#rsvp-size").value = String(rec.partySize);
     }
+    this.renderCompanionFields(rec?.companions ?? []);
     if (focus) this.$<HTMLInputElement>("#rsvp-name").focus();
   }
 
@@ -302,21 +329,100 @@ export class Invite {
     this.$("#view-yes").hidden = !yes;
     this.$("#view-no").hidden = yes;
     if (yes) {
-      const who = rec.partySize > 1 ? `${rec.name}, ${rec.partySize} people` : rec.name;
-      this.$("#yes-sum").textContent = `You’re down as ${who}.`;
+      const others = rec.companions.map((c) => c.name);
+      const withText = others.length ? `, with ${others.length > 1 ? `${others.slice(0, -1).join(", ")} and ${others[others.length - 1]}` : others[0]}` : "";
+      this.$("#yes-sum").textContent = `You’re down as ${rec.name}${withText}.`;
       this.$("#join-first").textContent = firstName(rec.name);
-      this.root.querySelectorAll<HTMLInputElement>('input[name="character"]').forEach((r) => {
-        r.checked = r.value === rec.character;
-      });
+      this.draftLook = parseLook(rec.character) ?? parseLook(randomLook())!;
+      this.draftPets = rec.companions.map((c) => ({ ...c }));
       this.$("#join-status").textContent = "";
+      this.renderLook(false);
       this.setJoinError(null);
     }
     if (focus) this.$(yes ? "#yes-h" : "#no-h").focus();
   }
 
-  private selectedCharacter(): CharacterId | null {
-    const picked = this.root.querySelector<HTMLInputElement>('input[name="character"]:checked');
-    return picked && (CHARACTER_IDS as readonly string[]).includes(picked.value) ? (picked.value as CharacterId) : null;
+  /** Draws one name field for each extra person, keeping anything already typed. */
+  private renderCompanionFields(saved: Companion[] = []): void {
+    const box = this.$("#rsvp-companions");
+    const typed = Array.from(box.querySelectorAll<HTMLInputElement>("input"), (i) => i.value);
+    const extra = Math.max(0, Number(this.$<HTMLSelectElement>("#rsvp-size").value) - 1);
+    box.hidden = extra === 0;
+    box.replaceChildren();
+    if (extra === 0) return;
+    const title = document.createElement("p");
+    title.className = "field__title";
+    title.textContent = extra === 1 ? "Who’s coming with you?" : "Who’s coming with you? They each join the park as a pet.";
+    box.append(title);
+    for (let i = 0; i < extra; i++) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.id = `rsvp-comp-${i}`;
+      input.maxLength = LIMITS.companionNameMax;
+      input.autocapitalize = "words";
+      input.placeholder = `Name of guest ${i + 2}`;
+      input.setAttribute("aria-label", `Name of guest ${i + 2}`);
+      input.value = typed[i] ?? saved[i]?.name ?? "";
+      box.append(input);
+    }
+  }
+
+  /** Redraws the customiser from the draft look. */
+  private renderLook(dirty: boolean): void {
+    const code = this.draftLook.join(".");
+    this.$("#look-preview").innerHTML = guestIcon(code);
+    const swatches = (part: number, colours: string[], label: string) =>
+      colours
+        .map(
+          (c, v) =>
+            `<button type="button" class="sw" style="--c:${c}" data-part="${part}" data-val="${v}" aria-pressed="${this.draftLook[part] === v}" aria-label="${label} ${v + 1}"></button>`,
+        )
+        .join("");
+    const chips = HAIR_STYLES.slice(0, LOOK_PARTS[1])
+      .map((h, v) => `<button type="button" class="chipbtn" data-part="1" data-val="${v}" aria-pressed="${this.draftLook[1] === v}">${esc(h.label)}</button>`)
+      .join("");
+    const row = (label: string, body: string) => `<div class="look__row"><span class="look__label">${label}</span><div class="look__set">${body}</div></div>`;
+    this.$("#look-opts").innerHTML =
+      row("Skin", swatches(0, SKINS, "Skin")) +
+      row("Hair", chips) +
+      row("Hair colour", swatches(2, HAIR_COLORS, "Hair colour")) +
+      row("Top", swatches(3, TOPS, "Top")) +
+      row("Bottoms", swatches(4, BOTTOMS, "Bottoms"));
+
+    const pets = this.$("#pets");
+    pets.replaceChildren();
+    this.draftPets.forEach((pet, i) => {
+      const [kind, colour] = parsePet(pet.pet) ?? [0, 0];
+      const el = document.createElement("div");
+      el.className = "petrow";
+      el.innerHTML =
+        `<div class="pet__art">${petIcon(pet.pet)}</div><div class="pet__body"><p class="pet__name"></p>` +
+        `<div class="look__set">${PET_KINDS.map((k, v) => `<button type="button" class="chipbtn" data-pet="${i}" data-slot="0" data-val="${v}" aria-pressed="${kind === v}">${k}</button>`).join("")}</div>` +
+        `<div class="look__set">${PET_COLORS.map((c, v) => `<button type="button" class="sw" style="--c:${c}" data-pet="${i}" data-slot="1" data-val="${v}" aria-pressed="${colour === v}" aria-label="Pet colour ${v + 1}"></button>`).join("")}</div></div>`;
+      el.querySelector(".pet__name")!.textContent = `${pet.name}, your plus-one`;
+      pets.append(el);
+    });
+
+    this.$<HTMLButtonElement>("#look-save").disabled = !dirty;
+    if (dirty) this.$("#join-status").textContent = "Not saved yet.";
+  }
+
+  private async saveLook(): Promise<void> {
+    if (this.saving) return;
+    const rec = loadRsvp();
+    if (!rec?.saved || rec.status !== "yes") return;
+    const record: LocalRsvp = { ...rec, character: this.draftLook.join("."), companions: this.draftPets.map((p) => ({ ...p })) };
+    this.pending = { kind: "join", record, payload: this.toPayload(record) };
+    await this.send();
+  }
+
+  /** Called when the guest drops their character somewhere new in the park. */
+  async savePosition(pos: [number, number]): Promise<void> {
+    const rec = loadRsvp();
+    if (this.saving || !rec?.saved || rec.status !== "yes") return;
+    const record: LocalRsvp = { ...rec, pos };
+    this.pending = { kind: "pos", record, payload: this.toPayload(record) };
+    await this.send();
   }
 
   private setNameError(on: boolean): void {
@@ -327,10 +433,7 @@ export class Invite {
   private setSaving(on: boolean): void {
     this.saving = on;
     this.root.querySelector(".rsvp")!.setAttribute("aria-busy", on ? "true" : "false");
-    this.root.querySelectorAll<HTMLInputElement>('input[name="character"]').forEach((r) => {
-      r.disabled = on;
-    });
-    for (const id of ["#rsvp-yes", "#rsvp-no", "#rsvp-retry", "#rsvp-fresh", "#join-retry"]) {
+    for (const id of ["#rsvp-yes", "#rsvp-no", "#rsvp-retry", "#rsvp-fresh", "#join-retry", "#look-save", "#look-shuffle"]) {
       const b = id === "#rsvp-no" ? this.noBtn : this.$<HTMLButtonElement>(id);
       if (on) {
         b.dataset.wasDisabled = b.disabled ? "1" : "";
@@ -387,24 +490,29 @@ export class Invite {
     const partySize = EVENT.plusOnesAllowed ? Math.min(EVENT.maxPartySize, Math.max(1, Math.round(rawSize) || 1)) : 1;
 
     const existing = loadRsvp();
-    const identity = existing ?? { ...newIdentity(), character: null, showName: true, saved: false };
+    const identity = existing ?? { ...newIdentity(), character: null, companions: [], pos: null, showName: true, saved: false };
+
+    // Everyone a guest brings must be named. Each one joins the park as a pet (random at first).
+    let companions = identity.companions;
+    if (status === "yes") {
+      const fields = Array.from(this.$("#rsvp-companions").querySelectorAll<HTMLInputElement>("input")).slice(0, partySize - 1);
+      const names = fields.map((f) => cleanName(f.value).slice(0, LIMITS.companionNameMax));
+      const missing = names.findIndex((n) => !n);
+      if (names.length !== partySize - 1 || missing !== -1) {
+        this.$("#rsvp-comp-err").hidden = false;
+        fields[Math.max(0, missing)]?.focus();
+        return;
+      }
+      companions = names.map((n, i) => ({ name: n, pet: identity.companions[i]?.pet ?? randomPet() }));
+    }
+
     // Saying yes always puts a character in the park. A first-timer gets a random one and can change it after.
-    const character = identity.character ?? (status === "yes" ? CHARACTER_IDS[Math.floor(Math.random() * CHARACTER_IDS.length)] : null);
-    const record: LocalRsvp = { ...identity, name, status, partySize, character, showName: true, saved: false };
+    const character = identity.character ?? (status === "yes" ? randomLook() : null);
+    const record: LocalRsvp = { ...identity, name, status, partySize, character, companions, showName: true, saved: false };
     // Keep the id and token before the first request, so a retry after a dropped connection
     // or a reload updates the same response instead of adding a second one.
     if (!existing) storeRsvp(record);
     this.pending = { kind: "rsvp", record, payload: this.toPayload(record) };
-    await this.send();
-  }
-
-  private async join(character: CharacterId): Promise<void> {
-    if (this.saving) return;
-    const rec = loadRsvp();
-    if (!rec?.saved || rec.status !== "yes") return;
-    if (rec.character === character) return;
-    const record: LocalRsvp = { ...rec, character, showName: true };
-    this.pending = { kind: "join", record, payload: this.toPayload(record) };
     await this.send();
   }
 
@@ -417,6 +525,8 @@ export class Invite {
       partySize: r.partySize,
       character: r.character,
       publicName: r.status === "yes" && r.character ? firstName(r.name) || null : null,
+      companions: r.status === "yes" ? r.companions.slice(0, Math.max(0, r.partySize - 1)) : [],
+      pos: r.pos,
     };
   }
 
@@ -433,14 +543,15 @@ export class Invite {
       storeRsvp(record);
       this.pending = null;
       this.setSaving(false);
-      this.showSaved(record, job.kind === "rsvp");
-      const joinedNow = record.status === "yes" && record.character !== null;
-      this.hooks.onAttendees(res.attendees, res.you, joinedNow);
-      if (job.kind === "rsvp") {
+      if (job.kind !== "pos") this.showSaved(record, job.kind === "rsvp");
+      this.hooks.onAttendees(res.attendees, res.you, job.kind === "rsvp" && record.status === "yes");
+      if (job.kind === "pos") {
+        this.hooks.announce("Your character has moved.");
+      } else if (job.kind === "rsvp") {
         this.hooks.announce(record.status === "yes" ? "Saved. See you at the picnic. Your character has joined the park." : "Saved. You’ll be missed. Thanks for letting me know.");
       } else {
-        this.hooks.announce("Your character in the park has changed.");
-        this.$("#join-status").textContent = "Changed. That’s you in the park now.";
+        this.hooks.announce("Your look in the park has changed.");
+        this.$("#join-status").textContent = "Saved. That’s you in the park now.";
         this.hooks.showPark();
       }
     } catch (e) {

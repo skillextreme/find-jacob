@@ -1,9 +1,12 @@
 /** Thin client for the Netlify functions. The game and the invitation work without it. */
-import type { CharacterId } from "./event.config.ts";
+import type { Companion } from "./event.config.ts";
 
 export interface PublicGuest {
-  character: CharacterId;
+  key?: string;
+  character: string;
   displayName?: string;
+  pos?: [number, number];
+  pets?: Companion[];
 }
 export interface Attendees {
   totalComing: number;
@@ -15,8 +18,10 @@ export interface RsvpPayload {
   name: string;
   status: "yes" | "no";
   partySize: number;
-  character: CharacterId | null;
+  character: string | null;
   publicName: string | null;
+  companions: Companion[];
+  pos: [number, number] | null;
 }
 export interface RsvpResult {
   ok: true;

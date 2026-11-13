@@ -53,13 +53,57 @@ export const EVENT: EventConfig = {
   published: true,
 };
 
-/** Guest characters a guest can pick after saying yes. Ids are validated on the server. */
-export const CHARACTER_IDS = ["sunny", "sky", "fern", "plum", "mint", "sand"] as const;
-export type CharacterId = (typeof CHARACTER_IDS)[number];
+/**
+ * A guest's look is five small numbers joined by dots: skin.hairStyle.hairColour.top.bottoms
+ * (for example "2.4.0.3.1"). A pet's look is kind.colour (for example "1.3").
+ * The counts below say how many choices each part has; the drawings live in src/art.ts.
+ */
+export const LOOK_PARTS = [6, 7, 5, 8, 6] as const;
+export const PET_PARTS = [3, 5] as const;
+
+/** Looks from the first version of the site, kept so older saved responses still draw. */
+const LEGACY_LOOKS: Record<string, string> = {
+  sunny: "1.1.1.0.1",
+  sky: "4.5.0.1.2",
+  fern: "2.4.0.2.3",
+  plum: "0.3.2.3.4",
+  mint: "3.6.0.4.0",
+  sand: "1.2.2.5.5",
+};
+
+function parseCode(code: unknown, parts: readonly number[]): number[] | null {
+  if (typeof code !== "string" || code.length > 24) return null;
+  const nums = code.split(".").map((n) => (/^\d{1,2}$/.test(n) ? Number(n) : -1));
+  if (nums.length !== parts.length) return null;
+  return nums.every((n, i) => n >= 0 && n < parts[i]) ? nums : null;
+}
+
+/** Returns the look as numbers, or null if the code isn't a valid look. */
+export function parseLook(code: unknown): number[] | null {
+  if (typeof code === "string" && code in LEGACY_LOOKS) return parseCode(LEGACY_LOOKS[code], LOOK_PARTS);
+  return parseCode(code, LOOK_PARTS);
+}
+export function parsePet(code: unknown): number[] | null {
+  return parseCode(code, PET_PARTS);
+}
+/** Canonical look code, or null. */
+export function normalizeLook(code: unknown): string | null {
+  return parseLook(code)?.join(".") ?? null;
+}
+const pick = (parts: readonly number[]) => parts.map((n) => Math.floor(Math.random() * n)).join(".");
+export const randomLook = () => pick(LOOK_PARTS);
+export const randomPet = () => pick(PET_PARTS);
+
+/** Someone a guest is bringing. They appear in the park as a named pet beside the guest. */
+export interface Companion {
+  name: string;
+  pet: string;
+}
 
 export const LIMITS = {
   nameMax: 40,
   publicNameMax: 20,
+  companionNameMax: 20,
   /** Individual characters drawn in the park at once. The count stays accurate above this. */
   maxVisibleGuests: 24,
 } as const;

@@ -31,10 +31,12 @@ To correct or remove a response by hand, use the Netlify dashboard: **Blobs → 
 
 - A guest's device creates a response id and a private edit token. The server stores only a SHA-256 hash of the token. Sending the same id and token again updates the same response, so double taps and retries never create a second attendee.
 - A guest can change their answer from the same device. A different device creates a new response (the host view shows both, and you can delete one in the Blobs dashboard).
-- Everyone who says yes appears in the park with a character (random at first, changeable) and their first name. This is public to anyone with the link and is not optional; the form says so before they answer.
+- Everyone who says yes appears in the park with a character and their first name. The look starts random; guests can change skin, hair and clothes, and drag their character to stand where they like.
+- Anyone a guest brings must be named and appears beside them as a pet (dog, cat or bunny, also customisable).
+- After the reveal the other park-goers wander about, guests wave, and seven secrets are hidden in the park (tap Jacob, the dog, the duck, a balloon, a butterfly, the pond and the bush at the front). Tapping the sun is an uncounted bonus. This is public to anyone with the link and is not optional; the form says so before they answer.
 - The public list (`/api/attendees`) returns only the headcount and, for each yes, a character and first name. No surnames, ids or tokens, and nobody who said no.
 - The "Can't make it" button runs away from the mouse or finger and can't be clicked. Only keyboard users (Tab, then Enter) can decline on the site.
-- Anyone with the link can RSVP. Writes are limited to 20 per IP address per 10 minutes.
+- Anyone with the link can RSVP. Writes are limited to 60 per IP address per 10 minutes (each look change or character move is one write).
 
 ## Develop
 

@@ -7,6 +7,7 @@ interface Row {
   partySize: number;
   character: string | null;
   publicName: string | null;
+  companions?: { name: string }[];
   updatedAt: string;
 }
 interface Summary {
@@ -56,10 +57,9 @@ async function load(key: string): Promise<void> {
   for (const r of data.responses) {
     const tr = document.createElement("tr");
     tr.append(
-      cell(r.name),
+      cell(r.status === "yes" && r.companions?.length ? `${r.name} + ${r.companions.map((c) => c.name).join(", ")}` : r.name),
       cell(r.status === "yes" ? "Yes" : "No"),
       cell(r.status === "yes" ? String(r.partySize) : "–", "num"),
-      cell(r.character ? (r.publicName ? `${r.character} (shown as ${r.publicName})` : `${r.character} (name hidden)`) : "–"),
       cell(fmt.format(new Date(r.updatedAt))),
     );
     body.append(tr);

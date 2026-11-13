@@ -3,7 +3,7 @@
  * Private data (names, token hashes, ids) never leaves through the public attendee list.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
-import { CHARACTER_IDS, EVENT, LIMITS, type CharacterId } from "../../src/event.config.ts";
+import { EVENT, LIMITS, normalizeLook, parsePet, randomLook, randomPet, type Companion } from "../../src/event.config.ts";
 
 export interface KV {
   get(key: string): Promise<unknown | null>;
@@ -19,15 +19,29 @@ export interface StoredResponse {
   name: string;
   status: "yes" | "no";
   partySize: number;
-  character: CharacterId | null;
+  /** Look code (see src/event.config.ts). */
+  character: string | null;
   publicName: string | null;
+  /** The people this guest is bringing, shown as named pets. */
+  companions?: Companion[];
+  /** Where the guest put their character, as two 0–1 numbers. */
+  pos?: [number, number] | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface PublicAttendees {
   totalComing: number;
-  guests: { character: CharacterId; displayName?: string }[];
+  guests: PublicGuest[];
+}
+
+export interface PublicGuest {
+  /** Short hash of the response id, so a device can spot its own character. Not a secret. */
+  key: string;
+  character: string;
+  displayName?: string;
+  pos?: [number, number];
+  pets?: Companion[];
 }
 
 export interface Reply {
@@ -35,12 +49,14 @@ export interface Reply {
   body: Record<string, unknown>;
 }
 
-const THROTTLE_MAX = 20;
+const THROTTLE_MAX = 60;
 const THROTTLE_WINDOW_MS = 10 * 60 * 1000;
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOKEN_RE = /^[0-9a-f]{32,128}$/i;
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+export const guestKey = (id: string) => sha256(`guest:${id.toLowerCase()}`).slice(0, 12);
 
 function sameHash(a: string, b: string): boolean {
   const x = Buffer.from(a, "hex");
@@ -71,12 +87,16 @@ function toPublic(rows: StoredResponse[], forId?: string): { attendees: PublicAt
     totalComing += r.partySize;
     if (!r.character) continue;
     if (r.id === forId) you = guests.length;
-    guests.push(r.publicName ? { character: r.character, displayName: r.publicName } : { character: r.character });
+    const g: PublicGuest = { key: guestKey(r.id), character: normalizeLook(r.character) ?? "1.2.0.1.0" };
+    if (r.publicName) g.displayName = r.publicName;
+    if (r.pos) g.pos = r.pos;
+    if (r.companions?.length) g.pets = r.companions;
+    guests.push(g);
   }
   return { attendees: { totalComing, guests }, you };
 }
 
-/** Allows at most 20 writes per IP per 10 minutes. */
+/** Allows at most 60 writes per IP per 10 minutes (changing a look or moving a character each count as one). */
 async function throttled(kv: KV, ip: string, now: number): Promise<boolean> {
   const key = `throttle/${sha256(`${EVENT.id}:${ip}`).slice(0, 24)}`;
   const cur = (await kv.get(key)) as { start: number; count: number } | null;
@@ -102,18 +122,45 @@ export async function handleRsvp(input: unknown, ip: string, kv: KV, now = Date.
   if (typeof b.partySize !== "number" || !Number.isInteger(b.partySize) || b.partySize < 1 || b.partySize > maxParty) {
     return { status: 400, body: { error: "invalid_party_size" } };
   }
-  let character: CharacterId | null = null;
+  let character: string | null = null;
   if (b.character !== null && b.character !== undefined) {
-    if (typeof b.character !== "string" || !(CHARACTER_IDS as readonly string[]).includes(b.character)) {
-      return { status: 400, body: { error: "invalid_character" } };
-    }
-    character = b.character as CharacterId;
+    character = normalizeLook(b.character);
+    if (!character) return { status: 400, body: { error: "invalid_character" } };
   }
+
+  // The people a guest brings must be named, and each one appears as a pet. Not optional.
+  const companions: Companion[] = [];
+  if (b.status === "yes" && b.partySize > 1) {
+    if (!Array.isArray(b.companions) || b.companions.length !== b.partySize - 1) {
+      return { status: 400, body: { error: "companions_required" } };
+    }
+    for (const c of b.companions as unknown[]) {
+      const row = (c ?? {}) as Record<string, unknown>;
+      const cname = cleanText(row.name, LIMITS.companionNameMax);
+      if (!cname) return { status: 400, body: { error: "invalid_companion_name" } };
+      let pet = randomPet();
+      if (row.pet !== null && row.pet !== undefined) {
+        const parsed = parsePet(row.pet);
+        if (!parsed) return { status: 400, body: { error: "invalid_pet" } };
+        pet = parsed.join(".");
+      }
+      companions.push({ name: cname, pet });
+    }
+  }
+
+  let pos: [number, number] | null = null;
+  if (b.pos !== null && b.pos !== undefined) {
+    const p = b.pos as unknown[];
+    const ok = Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1);
+    if (!ok) return { status: 400, body: { error: "invalid_position" } };
+    pos = [Math.round((p[0] as number) * 1000) / 1000, Math.round((p[1] as number) * 1000) / 1000];
+  }
+
   // Everyone who says yes appears in the park with a character and their first name. It is not optional:
   // a missing character is filled in at random, and the public name always comes from the name given.
   let publicName: string | null = null;
   if (b.status === "yes") {
-    if (!character) character = CHARACTER_IDS[Math.floor(Math.random() * CHARACTER_IDS.length)];
+    if (!character) character = randomLook();
     publicName = name.split(" ")[0].slice(0, LIMITS.publicNameMax);
   }
 
@@ -135,6 +182,8 @@ export async function handleRsvp(input: unknown, ip: string, kv: KV, now = Date.
     partySize: b.partySize,
     character,
     publicName,
+    companions,
+    pos,
     createdAt: existing?.createdAt ?? stamp,
     updatedAt: stamp,
   };

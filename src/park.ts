@@ -5,7 +5,7 @@
  */
 import * as art from "./art.ts";
 import { C } from "./art.ts";
-import { LIMITS, type CharacterId } from "./event.config.ts";
+import { LIMITS, type Companion } from "./event.config.ts";
 
 export type Mode = "landscape" | "portrait";
 export interface Pt {
@@ -13,9 +13,21 @@ export interface Pt {
   y: number;
 }
 export interface PublicGuest {
-  character: CharacterId;
+  key?: string;
+  character: string;
   displayName?: string;
+  /** Where the guest chose to stand: two 0–1 numbers inside the picnic area. */
+  pos?: [number, number];
+  /** People they are bringing, drawn as named pets. */
+  pets?: Companion[];
 }
+
+/** The part of each composition where guests may stand (as fractions of the scene). */
+const GUEST_AREA = {
+  landscape: { x0: 0.04, x1: 0.58, y0: 0.45, y1: 0.96 },
+  portrait: { x0: 0.08, x1: 0.92, y0: 0.53, y1: 0.97 },
+};
+const PET_OFFSETS: [number, number][] = [[50, 8], [-50, 10], [88, 18], [-88, 18]];
 
 type Spot = [x: number, y: number, scale: number];
 interface ItemDef {
@@ -37,17 +49,17 @@ const reader = art.person({ skin: "#8C5A3C", hair: "#1D1A1A", hairStyle: "long",
 const jogger = art.person({ skin: "#F0C5A0", hair: "#6B4A2E", hairStyle: "pony", shirt: "#6CCDBB", bottom: "#4B4A6B" });
 
 const ITEMS: ItemDef[] = [
-  { id: "pond", svg: art.pond(), flat: true, L: [0.75, 0.87, 1], P: [0.27, 0.91, 0.82] },
+  { id: "pond", svg: art.pond(), flat: true, L: [0.7, 0.9, 1], P: [0.27, 0.91, 0.82] },
   { id: "blanket", svg: art.blanket(), flat: true, L: [0.33, 0.74, 1], P: [0.4, 0.69, 0.92] },
   { id: "jacob", cls: "jacob", svg: art.jacob(), L: [0, 0, 1], P: [0, 0, 0.95], rel: { to: "blanket", dx: 132, dy: -88 } },
   { id: "balloons", svg: art.balloons(), L: [0, 0, 1], P: [0, 0, 0.9], rel: { to: "blanket", dx: -172, dy: -18 } },
-  { id: "dog", cls: "dog", svg: `<g class="dog-move"><g class="dog-flip">${art.dog()}</g></g>`, L: [0.19, 0.5, 0.95], P: [0.3, 0.43, 0.9] },
+  { id: "dog", cls: "dog", svg: `<g class="dog-move"><g class="dog-flip"><g class="dog-roam">${art.dog()}</g></g></g>`, L: [0.19, 0.5, 0.95], P: [0.3, 0.43, 0.9] },
   { id: "bush", cls: "bush", svg: art.bush(true), L: [0.67, 0.5, 1], P: [0.56, 0.345, 0.85] },
-  { id: "duck", cls: "duck", svg: art.duck(), L: [0.6, 0.83, 0.95], P: [0.56, 0.86, 0.9] },
+  { id: "duck", cls: "duck", svg: art.duck(), L: [0.565, 0.8, 0.95], P: [0.56, 0.86, 0.9] },
   { id: "bench", svg: art.bench(), L: [0.1, 0.77, 1], P: [0.79, 0.8, 0.85] },
-  { id: "reader", cls: "walker", svg: reader, L: [0.155, 0.79, 0.95], P: [0.665, 0.815, 0.85] },
-  { id: "flyer", cls: "walker flyer", svg: flyer + `<g transform="translate(25,-62)">${art.kite(70, -300)}</g>`, L: [0.8, 0.6, 0.95], P: [0.16, 0.53, 0.85] },
-  { id: "jogger", cls: "walker", svg: jogger, L: [0.47, 0.41, 0.72], P: [0.4, 0.335, 0.68] },
+  { id: "reader", cls: "walker", svg: `<g class="roam roam-stroll">${reader}</g>`, L: [0.155, 0.79, 0.95], P: [0.665, 0.815, 0.85] },
+  { id: "flyer", cls: "walker flyer", svg: `<g class="roam roam-kite">${flyer}<g transform="translate(25,-62)">${art.kite(70, -300)}</g></g>`, L: [0.8, 0.6, 0.95], P: [0.16, 0.53, 0.85] },
+  { id: "jogger", cls: "walker", svg: `<g class="roam roam-jog">${jogger}</g>`, L: [0.47, 0.41, 0.72], P: [0.4, 0.335, 0.68] },
   { id: "tree1", svg: art.tree(0), L: [0.045, 0.53, 1.2], P: [0.05, 0.37, 0.95] },
   { id: "tree2", svg: art.tree(1), L: [0.115, 0.375, 0.8], P: [0.0, 0.62, 1.1] },
   { id: "tree3", svg: art.tree(1), L: [0.955, 0.5, 1.2], P: [0.97, 0.335, 0.9] },
@@ -58,7 +70,7 @@ const ITEMS: ItemDef[] = [
   { id: "pine2", svg: art.pine(), L: [0.985, 0.86, 1.4], P: [0.97, 0.995, 1.15] },
   { id: "pine3", svg: art.pine(), L: [0.225, 0.345, 0.62], P: [0.17, 0.272, 0.55] },
   { id: "pine4", svg: art.pine(), L: [0.64, 0.33, 0.55], P: [0.92, 0.27, 0.5] },
-  { id: "bush2", svg: art.bush(), L: [0.27, 0.92, 1], P: [0.1, 0.8, 0.8] },
+  { id: "bush2", cls: "gnome-bush", svg: art.bush(false, true), L: [0.27, 0.92, 1], P: [0.1, 0.8, 0.8] },
   { id: "bush3", svg: art.bush(), L: [0.87, 0.71, 0.9], P: [0.45, 0.48, 0.7] },
   { id: "bush4", svg: art.bush(), L: [0.39, 0.4, 0.7], P: [0.9, 0.62, 0.75] },
 ];
@@ -151,6 +163,8 @@ export class Park {
   private els = new Map<string, SVGGElement>();
   private spots = new Map<string, Spot>();
   private guests: PublicGuest[] = [];
+  /** Set to let this device's guest drag their own character. Called with the new position on drop. */
+  onGuestDrop: ((pos: [number, number]) => void) | null = null;
   private you: number | null = null;
   private inv: DOMMatrix | null = null;
   private fwd: DOMMatrix | null = null;
@@ -248,8 +262,8 @@ export class Park {
 
     this.bg.innerHTML =
       `<rect x="-20" y="-20" width="${W + 40}" height="${f(hz + 60)}" fill="${C.sky}"/>` +
-      `<circle cx="${f(W * 0.1)}" cy="${f(H * 0.09)}" r="${f(74 * cs)}" fill="${C.butter}" opacity=".4"/>` +
-      `<circle cx="${f(W * 0.1)}" cy="${f(H * 0.09)}" r="${f(50 * cs)}" fill="${C.butter}"/>` +
+      `<g id="sun" transform="translate(${f(W * 0.1)},${f(H * 0.09)}) scale(${cs})"><circle r="74" fill="${C.butter}" opacity=".4"/><circle r="50" fill="${C.butter}"/>` +
+      `<g class="sun-shades"><path d="M-36,-12 h30 v10 a13,13 0 0 1 -26,0 z M6,-12 h30 v10 a13,13 0 0 1 -26,0 z" fill="${C.ink}"/><path d="M-40,-10 h80" stroke="${C.ink}" stroke-width="4" stroke-linecap="round"/><path d="M-16,20 q16,12 32,0" fill="none" stroke="${C.ink}" stroke-width="3.5" stroke-linecap="round"/></g></g>` +
       cloud(0.3, 0.1, 1.1, "c1") + cloud(0.62, 0.17, 0.8, "c2") + cloud(0.9, 0.08, 1, "c3") +
       `<ellipse cx="${f(W * 0.22)}" cy="${f(hz + 50)}" rx="${f(W * 0.4)}" ry="105" fill="${C.hill}"/>` +
       `<ellipse cx="${f(W * 0.8)}" cy="${f(hz + 60)}" rx="${f(W * 0.46)}" ry="120" fill="${C.leaf2}"/>` +
@@ -318,6 +332,11 @@ export class Park {
     this.renderGuests(arrive === "all" ? "all" : arrive !== null ? me : null);
   }
 
+  private areaRect(): { x0: number; x1: number; y0: number; y1: number } {
+    const a = GUEST_AREA[this.mode];
+    return { x0: a.x0 * this.W, x1: a.x1 * this.W, y0: a.y0 * this.H, y1: a.y1 * this.H };
+  }
+
   private renderGuests(arrive: number | "all" | null): void {
     this.standing.querySelectorAll(".guest").forEach((n) => n.remove());
     // Names sit in their own layer on top, so a guest standing in front never hides one.
@@ -327,28 +346,49 @@ export class Park {
     if (b) {
       const xs = this.mode === "portrait" ? 0.8 : 1;
       const gs = this.mode === "portrait" ? 0.72 : 0.8;
+      const area = this.areaRect();
       this.guests.forEach((guest, i) => {
         const [dx, dy] = GUEST_SPOTS[i % GUEST_SPOTS.length];
-        const x = b[0] + dx * xs * b[2];
-        const y = b[1] + dy * b[2];
+        // A guest who placed their character stands there; everyone else gets a spot round the blanket.
+        const x = guest.pos ? area.x0 + guest.pos[0] * (area.x1 - area.x0) : b[0] + dx * xs * b[2];
+        const y = guest.pos ? area.y0 + guest.pos[1] * (area.y1 - area.y0) : b[1] + dy * b[2];
+        const mine = i === this.you;
         const g = document.createElementNS(SVG_NS, "g");
         const animate = arrive === "all" || arrive === i;
-        g.setAttribute("class", `item guest${i === this.you ? " you" : ""}${animate ? " arrive" : ""}`);
+        g.setAttribute("class", `item guest${mine ? " you" : ""}${animate ? " arrive" : ""}`);
         g.setAttribute("transform", `translate(${f(x)},${f(y)}) scale(${gs})`);
         g.dataset.y = String(y);
+        g.style.setProperty("--wd", `${-((i * 1.7) % 7).toFixed(1)}s`);
         if (animate) g.style.setProperty("--delay", `${arrive === "all" ? i * 70 : 0}ms`);
-        g.innerHTML = `<g class="guest-in">${art.guestFigure(guest.character)}</g>`;
-        if (guest.displayName) {
+        const pets = (guest.pets ?? []).slice(0, PET_OFFSETS.length);
+        g.innerHTML =
+          `<g class="guest-in">` +
+          (mine ? `<ellipse class="you-ring" cx="0" cy="2" rx="36" ry="11" fill="none" stroke="${C.butterDeep}" stroke-width="5"/>` : "") +
+          pets.map((p, k) => `<g class="pet" transform="translate(${PET_OFFSETS[k][0]},${PET_OFFSETS[k][1]})${PET_OFFSETS[k][0] < 0 ? " scale(-1,1)" : ""}">${art.petFigure(p.pet)}</g>`).join("") +
+          art.guestFigure(guest.character) +
+          `</g>`;
+
+        const tags = document.createElementNS(SVG_NS, "g");
+        tags.setAttribute("class", `tags${animate ? " arrive" : ""}`);
+        tags.setAttribute("transform", `translate(${f(x)},${f(y)}) scale(${gs})`);
+        const tag = (text: string, tx: number, ty: number, cls: string) => {
           const t = document.createElementNS(SVG_NS, "text");
-          t.setAttribute("class", `guest-name${animate ? " arrive" : ""}`);
-          t.setAttribute("transform", `translate(${f(x)},${f(y)}) scale(${gs})`);
-          // Neighbours in a row alternate between two heights so their names don't run together.
-          t.setAttribute("y", Math.round(dx / 76 + 10) % 2 === 0 ? "26" : "50");
+          t.setAttribute("class", cls);
+          t.setAttribute("x", String(tx));
+          t.setAttribute("y", String(ty));
           t.setAttribute("text-anchor", "middle");
-          t.textContent = guest.displayName; // plain text, never markup
-          labels.appendChild(t);
+          t.textContent = text; // plain text, never markup
+          tags.appendChild(t);
+        };
+        if (guest.displayName) {
+          // Neighbours in a row alternate between two heights so their names don't run together.
+          const low = pets.length > 0 || guest.pos ? false : Math.round(dx / 76 + 10) % 2 !== 0;
+          tag(guest.displayName, 0, low ? 50 : 26, "guest-name");
         }
+        pets.forEach((p, k) => tag(p.name, PET_OFFSETS[k][0], PET_OFFSETS[k][1] + (k < 2 ? 40 : 22), "guest-name pet-name"));
+        labels.appendChild(tags);
         this.standing.appendChild(g);
+        if (mine) this.makeDraggable(g, tags as SVGGElement, i, x, y, gs);
       });
     }
     for (const [id, [, y]] of this.spots) {
@@ -356,6 +396,94 @@ export class Park {
       if (el.parentNode === this.standing) el.dataset.y = String(y);
     }
     this.sortStanding();
+  }
+
+  /** Lets this device's guest pick their character up and put it down anywhere in the picnic area. */
+  private makeDraggable(g: SVGGElement, tags: SVGGElement, index: number, x0: number, y0: number, gs: number): void {
+    let start: Pt | null = null;
+    let cur = { x: x0, y: y0 };
+    let moved = false;
+    const place = (x: number, y: number) => {
+      const t = `translate(${f(x)},${f(y)}) scale(${gs})`;
+      g.setAttribute("transform", t);
+      tags.setAttribute("transform", t);
+    };
+    g.addEventListener("pointerdown", (e) => {
+      if (!this.onGuestDrop || (e.pointerType === "mouse" && e.button !== 0)) return;
+      e.preventDefault();
+      this.refreshMatrix();
+      start = this.toScene(e.clientX, e.clientY);
+      moved = false;
+      try {
+        g.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture is a nicety */
+      }
+      g.classList.add("dragging");
+    });
+    g.addEventListener("pointermove", (e) => {
+      if (!start) return;
+      const p = this.toScene(e.clientX, e.clientY);
+      if (!moved && Math.hypot(p.x - start.x, p.y - start.y) < 6 * this.unitsPerPx()) return;
+      moved = true;
+      const a = this.areaRect();
+      cur = { x: Math.min(a.x1, Math.max(a.x0, x0 + p.x - start.x)), y: Math.min(a.y1, Math.max(a.y0, y0 + p.y - start.y)) };
+      place(cur.x, cur.y);
+    });
+    const end = (commit: boolean) => {
+      if (!start) return;
+      start = null;
+      g.classList.remove("dragging");
+      if (!moved) return;
+      if (!commit) {
+        place(x0, y0);
+        return;
+      }
+      const a = this.areaRect();
+      const pos: [number, number] = [(cur.x - a.x0) / (a.x1 - a.x0), (cur.y - a.y0) / (a.y1 - a.y0)];
+      this.guests[index] = { ...this.guests[index], pos };
+      x0 = cur.x;
+      y0 = cur.y;
+      g.dataset.y = String(cur.y);
+      this.sortStanding();
+      this.onGuestDrop?.(pos);
+    };
+    // Browsers ignore touch-action on shapes inside an SVG, so stop the page scrolling here instead.
+    g.addEventListener("touchstart", (e) => { if (this.onGuestDrop) e.preventDefault(); }, { passive: false });
+    g.addEventListener("pointerup", () => end(true));
+    g.addEventListener("pointercancel", () => end(false));
+  }
+
+  /* ---------- Little effects ---------- */
+
+  /** A word that floats up and fades, in scene coordinates. */
+  pop(x: number, y: number, text: string): void {
+    const t = document.createElementNS(SVG_NS, "text");
+    t.setAttribute("class", "pop");
+    t.setAttribute("x", f(x));
+    t.setAttribute("y", f(y));
+    t.setAttribute("text-anchor", "middle");
+    t.style.fontSize = `${f(22 * Math.max(1, this.unitsPerPx()))}px`;
+    t.textContent = text;
+    this.svg.appendChild(t);
+    window.setTimeout(() => t.remove(), 1500);
+  }
+
+  /** A burst of paper confetti. */
+  confetti(x: number, y: number): void {
+    const g = document.createElementNS(SVG_NS, "g");
+    g.setAttribute("class", "confetti");
+    g.setAttribute("transform", `translate(${f(x)},${f(y)})`);
+    const colours = [C.butter, "#8FCBE6", "#FFFDF5", C.leaf2, "#B79AE0", C.butterDeep];
+    let html = "";
+    for (let i = 0; i < 26; i++) {
+      const a = (i / 26) * Math.PI * 2 + Math.random() * 0.4;
+      const d = 70 + Math.random() * 90;
+      html += `<rect class="bit" x="-4" y="-6" width="8" height="12" rx="2" fill="${colours[i % colours.length]}" style="--tx:${f(Math.cos(a) * d)}px;--ty:${f(Math.sin(a) * d - 60)}px;--rot:${Math.round(Math.random() * 720 - 360)}deg"/>`;
+    }
+    g.innerHTML = html;
+    this.svg.appendChild(g);
+    window.setTimeout(() => g.remove(), 1700);
   }
 
   /* ---------- Geometry ---------- */

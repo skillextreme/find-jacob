@@ -2,7 +2,7 @@
  * Same-device memory. Every localStorage call is wrapped: private windows and blocked
  * storage must never break the invitation.
  */
-import type { CharacterId } from "./event.config.ts";
+import { normalizeLook, parsePet, type Companion } from "./event.config.ts";
 
 const FOUND_KEY = "fj.found.v1";
 const RSVP_KEY = "fj.rsvp.v1";
@@ -15,7 +15,12 @@ export interface LocalRsvp {
   name: string;
   status: "yes" | "no";
   partySize: number;
-  character: CharacterId | null;
+  /** Look code. */
+  character: string | null;
+  /** People this guest is bringing, shown as pets. */
+  companions: Companion[];
+  /** Where the guest placed their character (0–1, 0–1), or null for the default spot. */
+  pos: [number, number] | null;
   showName: boolean;
   /** True once the server has confirmed this response. */
   saved: boolean;
@@ -61,7 +66,11 @@ export function loadRsvp(): LocalRsvp | null {
       name: typeof v.name === "string" ? v.name : "",
       status: v.status === "no" ? "no" : "yes",
       partySize: typeof v.partySize === "number" ? v.partySize : 1,
-      character: (v.character as CharacterId | null) ?? null,
+      character: normalizeLook(v.character),
+      companions: Array.isArray(v.companions)
+        ? v.companions.filter((c) => c && typeof c.name === "string" && parsePet(c.pet)).map((c) => ({ name: c.name, pet: c.pet }))
+        : [],
+      pos: Array.isArray(v.pos) && v.pos.length === 2 && v.pos.every((n) => typeof n === "number") ? (v.pos as [number, number]) : null,
       showName: v.showName === true,
       saved: v.saved === true,
     };
@@ -90,4 +99,15 @@ function randomHex(bytes: number): string {
 export function newIdentity(): { id: string; token: string } {
   const id = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${randomHex(4)}-${randomHex(2)}-4${randomHex(2).slice(1)}-a${randomHex(2).slice(1)}-${randomHex(6)}`;
   return { id, token: randomHex(32) };
+}
+
+/** The public key of a response id: the same short hash the server puts on each park guest. */
+export async function guestKey(id: string): Promise<string | null> {
+  try {
+    const data = new TextEncoder().encode(`guest:${id.toLowerCase()}`);
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 12);
+  } catch {
+    return null;
+  }
 }

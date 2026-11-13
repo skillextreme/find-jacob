@@ -3,7 +3,7 @@
  * (feet / base centre at 0,0, y going up into negative numbers), so the park can place
  * each piece with a single translate + scale.
  */
-import type { CharacterId } from "./event.config.ts";
+import { parseLook, parsePet } from "./event.config.ts";
 
 export const C = {
   cream: "#FBF3E0",
@@ -60,6 +60,7 @@ export interface PersonOpts {
   grin?: boolean;
   pendant?: boolean;
   capColor?: string;
+  partyHat?: boolean;
 }
 
 function hairMarkup(style: HairStyle, hair: string, capColor: string): string {
@@ -115,6 +116,18 @@ function arm(side: -1 | 1, skin: string, shirt: string): string {
   );
 }
 
+function partyHat(): string {
+  return (
+    `<g transform="rotate(-10 0 -146)">` +
+    `<path d="M-14,-144 L1,-186 L16,-144 Z" fill="${C.butter}" ${OUT}/>` +
+    `<path d="M-9,-158 L11,-158 M-4.5,-171 L6.5,-171" fill="none" stroke="#8FCBE6" stroke-width="4.5"/>` +
+    `<path d="M-14,-144 L1,-186 L16,-144 Z" fill="none" ${OUT}/>` +
+    `<path d="M-16,-144 h34" fill="none" stroke="${C.line}" stroke-width="4" stroke-linecap="round"/>` +
+    `<circle cx="1" cy="-188" r="5" fill="#FFFDF5" ${OUT}/>` +
+    `</g>`
+  );
+}
+
 /** A standing figure about 155 units tall. */
 export function person(o: PersonOpts): string {
   const shoes = o.shoes ?? "#ffffff";
@@ -142,6 +155,7 @@ export function person(o: PersonOpts): string {
     `<circle cx="-6.5" cy="-128" r="2.1" fill="${C.hairBlack}"/><circle cx="6.5" cy="-128" r="2.1" fill="${C.hairBlack}"/>` +
     mouth +
     hairMarkup(o.hairStyle, o.hair, o.capColor ?? o.shirt) +
+    (o.partyHat ? partyHat() : "") +
     `</g>`
   );
 }
@@ -154,6 +168,7 @@ export const JACOB: PersonOpts = {
   bottom: "url(#checks)",
   grin: true,
   pendant: true,
+  partyHat: true,
 };
 
 export function jacob(): string {
@@ -163,55 +178,105 @@ export function jacob(): string {
 /** Jacob's head and shoulders for the arrival screen. */
 export function jacobPortrait(): string {
   return (
-    `<svg viewBox="-36 -164 72 72" aria-hidden="true" focusable="false">` +
-    `<circle cx="0" cy="-128" r="36" fill="${C.butter}"/>` +
+    `<svg viewBox="-48 -198 96 96" aria-hidden="true" focusable="false">` +
+    `<circle cx="0" cy="-150" r="48" fill="${C.butter}"/>` +
+    `<circle cx="0" cy="-150" r="40" fill="${C.cream}" opacity=".55"/>` +
     person(JACOB) +
-    `<circle cx="0" cy="-128" r="34.5" fill="none" stroke="${C.line}" stroke-width="3"/>` +
+    `<circle cx="0" cy="-150" r="46.5" fill="none" stroke="${C.line}" stroke-width="3"/>` +
     `</svg>`
   );
 }
 
-export const GUESTS: Record<CharacterId, { label: string; opts: PersonOpts }> = {
-  sunny: {
-    label: "Sunny, yellow top and a bun",
-    opts: { skin: "#E0A77A", hair: "#3B2416", hairStyle: "bun", shirt: "#FFD25E", bottom: "#5E7FA8" },
-  },
-  sky: {
-    label: "Sky, blue top and a cap",
-    opts: { skin: "#8C5A3C", hair: "#1D1A1A", hairStyle: "cap", shirt: "#7EC3E6", bottom: "#3F5368", capColor: "#FFFDF5" },
-  },
-  fern: {
-    label: "Fern, green top and curly hair",
-    opts: { skin: "#C98F63", hair: "#2A1B14", hairStyle: "curly", shirt: "#8FCB7A", bottom: "#F3E6C8" },
-  },
-  plum: {
-    label: "Plum, purple top and long hair",
-    opts: { skin: "#F0C5A0", hair: "#5A3320", hairStyle: "long", shirt: "#B79AE0", bottom: "#4B4A6B" },
-  },
-  mint: {
-    label: "Mint, teal top and a ponytail",
-    opts: { skin: "#A86C45", hair: "#1D1A1A", hairStyle: "pony", shirt: "#6CCDBB", bottom: "#FFFDF5" },
-  },
-  sand: {
-    label: "Sand, white top and short hair",
-    opts: { skin: "#D9A07A", hair: "#6B4A2E", hairStyle: "short", shirt: "#FFFDF5", bottom: "#7C9A6D" },
-  },
-};
+/* ---------- Guest looks ---------- */
 
-export function guestFigure(id: CharacterId): string {
-  return person(GUESTS[id].opts);
+export const SKINS = ["#F0C5A0", "#E0A77A", "#C98F63", "#A86C45", "#8C5A3C", "#5E3B27"];
+export const HAIR_STYLES: { id: HairStyle; label: string }[] = [
+  { id: "messy", label: "Messy" },
+  { id: "bun", label: "Bun" },
+  { id: "short", label: "Short" },
+  { id: "long", label: "Long" },
+  { id: "curly", label: "Curly" },
+  { id: "cap", label: "Cap" },
+  { id: "pony", label: "Ponytail" },
+];
+export const HAIR_COLORS = ["#1D1A1A", "#3B2416", "#6B4A2E", "#A8552E", "#C9CDD0"];
+/** Coral is kept for Jacob, so nobody can dress as him. */
+export const TOPS = ["#FFD25E", "#7EC3E6", "#8FCB7A", "#B79AE0", "#6CCDBB", "#FFFDF5", "#F5A9C4", "#3F5368"];
+export const BOTTOMS = ["#3F5368", "#5E7FA8", "#F3E6C8", "#7C9A6D", "#4B4A6B", "#2E2B2B"];
+
+function lookOpts(code: string): PersonOpts {
+  const [skin, hair, hairColor, top, bottom] = parseLook(code) ?? [1, 2, 0, 1, 0];
+  return {
+    skin: SKINS[skin],
+    hair: HAIR_COLORS[hairColor],
+    hairStyle: HAIR_STYLES[hair].id,
+    shirt: TOPS[top],
+    bottom: BOTTOMS[bottom],
+    capColor: TOPS[top] === "#FFFDF5" ? "#FFD25E" : "#FFFDF5",
+  };
 }
 
-/** A guest character as a standalone icon for the picker. */
-export function guestIcon(id: CharacterId): string {
-  return `<svg viewBox="-34 -166 68 176" aria-hidden="true" focusable="false">${person(GUESTS[id].opts)}</svg>`;
+export function guestFigure(code: string): string {
+  return person(lookOpts(code));
+}
+
+/** A guest look as a standalone picture. */
+export function guestIcon(code: string): string {
+  return `<svg viewBox="-36 -166 72 176" aria-hidden="true" focusable="false">${person(lookOpts(code))}</svg>`;
+}
+
+/* ---------- Pets (plus-ones) ---------- */
+
+export const PET_KINDS = ["Dog", "Cat", "Bunny"];
+export const PET_COLORS = ["#D9A066", "#FFFDF5", "#A9B0B4", "#4A4340", "#E8924A"];
+const PET_SHADES = ["#B97E48", "#E6DFCB", "#868E93", "#2E2927", "#C06E2C"];
+
+function cat(fur: string, dark: string): string {
+  return (
+    shadow(22, 5) +
+    `<g class="pet-body">` +
+    `<g transform="translate(-18,-12)"><g class="pet-tail"><path d="M0,0 C-16,-2 -18,-22 -8,-30" fill="none" stroke="${C.line}" stroke-width="9" stroke-linecap="round"/><path d="M0,0 C-16,-2 -18,-22 -8,-30" fill="none" stroke="${fur}" stroke-width="5" stroke-linecap="round"/></g></g>` +
+    `<ellipse cx="0" cy="-15" rx="20" ry="15" fill="${fur}" ${OUT}/>` +
+    `<path d="M4,-40 L7,-56 L17,-46 Z M30,-40 L28,-56 L18,-46 Z" fill="${dark}" ${OUT}/>` +
+    `<circle cx="17" cy="-36" r="14" fill="${fur}" ${OUT}/>` +
+    `<circle cx="12" cy="-38" r="1.9" fill="#2A2422"/><circle cx="23" cy="-38" r="1.9" fill="#2A2422"/>` +
+    `<path d="M15.5,-33 h4 l-2,2.5 z" fill="#E08F8F"/>` +
+    `<path d="M9,-32 h-9 M9,-30 l-8,3 M26,-32 h9 M26,-30 l8,3" stroke="${C.line}" stroke-width="1.1" stroke-linecap="round" opacity=".7"/>` +
+    `</g>`
+  );
+}
+
+function bunny(fur: string, dark: string): string {
+  return (
+    shadow(20, 5) +
+    `<g class="pet-body">` +
+    `<circle cx="-17" cy="-10" r="6.5" fill="#FFFDF5" ${OUT}/>` +
+    `<ellipse cx="0" cy="-14" rx="18" ry="14" fill="${fur}" ${OUT}/>` +
+    `<g class="pet-ears"><ellipse cx="9" cy="-56" rx="4.5" ry="14" fill="${fur}" ${OUT} transform="rotate(-10 9 -44)"/><ellipse cx="19" cy="-56" rx="4.5" ry="14" fill="${fur}" ${OUT} transform="rotate(12 19 -44)"/>` +
+    `<ellipse cx="19" cy="-56" rx="1.8" ry="9" fill="${dark}" transform="rotate(12 19 -44)"/></g>` +
+    `<circle cx="14" cy="-32" r="12.5" fill="${fur}" ${OUT}/>` +
+    `<circle cx="10" cy="-34" r="1.8" fill="#2A2422"/><circle cx="19" cy="-34" r="1.8" fill="#2A2422"/>` +
+    `<circle cx="14.5" cy="-29.5" r="1.8" fill="#E08F8F"/>` +
+    `</g>`
+  );
+}
+
+export function petFigure(code: string): string {
+  const [kind, color] = parsePet(code) ?? [0, 0];
+  const fur = PET_COLORS[color];
+  const dark = PET_SHADES[color];
+  if (kind === 1) return cat(fur, dark);
+  if (kind === 2) return bunny(fur, dark);
+  return `<g transform="scale(0.62)">${dog(fur, dark)}</g>`;
+}
+
+export function petIcon(code: string): string {
+  return `<svg viewBox="-34 -66 68 74" aria-hidden="true" focusable="false">${petFigure(code)}</svg>`;
 }
 
 /* ---------- Animals ---------- */
 
-export function dog(): string {
-  const fur = "#D9A066";
-  const dark = "#B97E48";
+export function dog(fur = "#D9A066", dark = "#B97E48"): string {
   return (
     shadow(34) +
     `<g class="dog-body">` +
@@ -255,13 +320,17 @@ export function duck(): string {
 
 /* ---------- Plants and props ---------- */
 
-export function bush(withBird = false): string {
+export function bush(withBird = false, withGnome = false): string {
+  const gnome = withGnome
+    ? `<g class="bush-gnome"><circle cx="-6" cy="-52" r="11" fill="#F0C5A0" ${OUT}/><path d="M-17,-50 q11,22 22,0 z" fill="#FFFDF5" ${OUT}/><path d="M-19,-56 L-6,-92 L7,-56 Z" fill="#5E7FA8" ${OUT}/><circle cx="-10" cy="-54" r="1.5" fill="#2A2422"/><circle cx="-2" cy="-54" r="1.5" fill="#2A2422"/></g>`
+    : "";
   const bird = withBird
     ? `<g class="bush-bird"><ellipse cx="8" cy="-44" rx="11" ry="9" fill="#8FCBE6" ${OUT}/><circle cx="16" cy="-52" r="7" fill="#8FCBE6" ${OUT}/><path d="M22,-53 l8,2 l-8,3 z" fill="#F4A340" ${OUT}/><circle cx="18" cy="-54" r="1.5" fill="#3A2A22"/></g>`
     : "";
   return (
     shadow(48, 7) +
     bird +
+    gnome +
     `<g class="bush-leaves">` +
     blob(
       [
@@ -344,6 +413,7 @@ export function pond(): string {
   return (
     `<ellipse cx="0" cy="0" rx="150" ry="52" fill="${C.water}" ${OUT}/>` +
     `<path d="M-90,-10 q20,-10 44,0 M10,14 q22,-10 48,0 M-30,26 q14,-7 30,0" fill="none" stroke="${C.waterLight}" stroke-width="4" stroke-linecap="round"/>` +
+    `<g class="fish"><path d="M-14,0 q10,-10 22,0 q-12,10 -22,0 z M8,0 l10,-7 v14 z" fill="#F4A340" ${OUT}/><circle cx="-7" cy="-1" r="1.4" fill="#2A2422"/></g>` +
     `<g transform="translate(96,-30)"><ellipse rx="18" ry="8" fill="${C.leaf2}" ${OUT}/><circle cx="2" cy="-4" r="4.5" fill="#fff"/></g>` +
     `<g transform="translate(-112,22)"><path d="M0,0 v-34 M8,0 v-26 M-8,0 v-22" stroke="${C.leafDark}" stroke-width="3.5" stroke-linecap="round"/><ellipse cx="0" cy="-36" rx="4" ry="9" fill="${C.trunk}"/><ellipse cx="8" cy="-28" rx="3.5" ry="8" fill="${C.trunk}"/></g>`
   );
@@ -379,7 +449,7 @@ export function cloud(): string {
 export function butterfly(fill: string): string {
   const wing = (x: number, rot: number) =>
     `<ellipse cx="${x}" cy="-3" rx="6.5" ry="9" transform="rotate(${rot} ${x} -3)" fill="${fill}" stroke="${C.line}" stroke-width="1.6"/>`;
-  return `<g class="butterfly">${wing(-6, -28)}${wing(6, 28)}<path d="M0,-9 V5" stroke="${C.line}" stroke-width="2.2" stroke-linecap="round"/></g>`;
+  return `<circle r="24" cy="-3" fill="transparent"/><g class="butterfly">${wing(-6, -28)}${wing(6, 28)}<path d="M0,-9 V5" stroke="${C.line}" stroke-width="2.2" stroke-linecap="round"/></g>`;
 }
 
 export function tuft(): string {

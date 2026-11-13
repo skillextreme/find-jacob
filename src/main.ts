@@ -7,7 +7,7 @@ import { fetchAttendees, type Attendees } from "./api.ts";
 import { Invite } from "./invite.ts";
 import type { Park } from "./park.ts";
 import type { Search } from "./search.ts";
-import { hasFound, markFound } from "./storage.ts";
+import { guestKey, hasFound, loadRsvp, markFound } from "./storage.ts";
 
 type State = "loading" | "searching" | "revealing" | "invite";
 
@@ -33,6 +33,8 @@ let search: Search | null = null;
 let invite: Invite | null = null;
 let attendees: Attendees | null = null;
 let you: number | null = null;
+let eggs: { refresh(): void } | null = null;
+const eggChip = $("egg-chip");
 let inputKind: "touch" | "pointer" | "keyboard" = window.matchMedia("(pointer: coarse)").matches ? "touch" : "pointer";
 let instructionOverride: string | null = null;
 
@@ -69,6 +71,7 @@ function ensureInvite(): Invite {
         attendees = a;
         you = me;
         showAttendees(arriveSelf ? "self" : "none");
+        void findSelf();
       },
       showPark: () => {
         if (!sidePanelQuery.matches) window.scrollTo({ top: 0, behavior: reducedMotion() ? "auto" : "smooth" });
@@ -84,15 +87,35 @@ function showAttendees(arrive: "all" | "self" | "none"): void {
   const total = attendees?.totalComing ?? 0;
   countBadge.hidden = total <= 0;
   countBadge.textContent = total === 1 ? "1 coming" : `${total} coming`;
-  invite?.setCount(attendees ? total : null, (attendees?.guests ?? []).flatMap((g) => (g.displayName ? [g.displayName] : [])));
+  invite?.setCount(attendees ? total : null, (attendees?.guests ?? []).flatMap((g) =>
+    g.displayName ? [g.pets?.length ? `${g.displayName} (with ${g.pets.map((p) => p.name).join(" and ")})` : g.displayName] : [],
+  ));
   if (!park) return;
   park.setGuests(attendees?.guests ?? [], you, arrive === "all" ? "all" : arrive === "self" ? you : null);
+}
+
+/**
+ * Works out which park guest belongs to this device, so they can drag their own character.
+ * The server marks each guest with a short public hash of their response id.
+ */
+async function findSelf(): Promise<void> {
+  const rec = loadRsvp();
+  if (!attendees || !rec?.saved || rec.status !== "yes") return;
+  const key = await guestKey(rec.id);
+  if (!key || !attendees) return;
+  const index = attendees.guests.findIndex((g) => g.key === key);
+  if (index !== -1 && index !== you) {
+    you = index;
+    showAttendees("none");
+  }
 }
 
 async function loadAttendees(): Promise<void> {
   try {
     attendees = await fetchAttendees();
+    you = null;
     showAttendees("all");
+    void findSelf();
   } catch {
     // The park and the RSVP keep working without the shared gathering.
   }
@@ -137,6 +160,7 @@ function enterInvite(animated: boolean): void {
   window.setTimeout(() => park?.refreshMatrix(), 700);
   showAttendees("all");
   void loadAttendees();
+  eggs?.refresh();
 }
 
 function startSearch(): void {
@@ -145,6 +169,7 @@ function startSearch(): void {
   inviteRoot.hidden = true;
   replay.hidden = true;
   countBadge.hidden = true;
+  eggChip.hidden = true;
   skip.hidden = false;
   instructionOverride = null;
   renderInstruction();
@@ -160,7 +185,7 @@ async function boot(): Promise<void> {
   $("portrait").innerHTML = jacobPortrait();
   renderInstruction();
   try {
-    const [{ Park }, { Search }] = await Promise.all([import("./park.ts"), import("./search.ts")]);
+    const [{ Park }, { Search }, { initEggs }] = await Promise.all([import("./park.ts"), import("./search.ts"), import("./eggs.ts")]);
     park = new Park(finder);
     search = new Search(park, stage, finder, bubble, {
       announce,
@@ -177,6 +202,8 @@ async function boot(): Promise<void> {
       onRevealStart: () => setState("revealing"),
       onRevealed: () => enterInvite(true),
     });
+    park.onGuestDrop = (pos) => void invite?.savePosition(pos);
+    eggs = initEggs(park, { isRevealed: () => app.dataset.state === "invite", reducedMotion, announce, chip: eggChip });
     layout();
     // Give the web font a moment, but never hold the game up for it.
     await Promise.race([document.fonts?.ready ?? Promise.resolve(), new Promise((r) => window.setTimeout(r, 1200))]);

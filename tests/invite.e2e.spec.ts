@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route, type TestInfo } from "@playwright/test";
 
 const isPhone = (info: TestInfo) => info.project.name === "phone";
@@ -84,7 +85,7 @@ async function skipToInvite(page: Page): Promise<void> {
 interface MockApi {
   posts: Record<string, unknown>[];
   failNext: number;
-  guests: { character: string; displayName?: string }[];
+  guests: Record<string, unknown>[];
   delayMs: number;
 }
 
@@ -105,8 +106,16 @@ async function mockApi(page: Page): Promise<MockApi> {
     }
     total = body.status === "yes" ? (body.partySize as number) : 0;
     api.guests =
-      body.status === "yes" && body.character
-        ? [{ character: body.character as string, ...(body.publicName ? { displayName: body.publicName as string } : {}) }]
+      body.status === "yes"
+        ? [
+            {
+              key: createHash("sha256").update(`guest:${String(body.id).toLowerCase()}`).digest("hex").slice(0, 12),
+              character: body.character,
+              displayName: String(body.name).split(" ")[0],
+              ...(body.pos ? { pos: body.pos } : {}),
+              ...((body.companions as unknown[]).length ? { pets: body.companions } : {}),
+            },
+          ]
         : [];
     return route.fulfill({ json: { ok: true, attendees: { totalComing: total, guests: api.guests }, you: api.guests.length ? 0 : null } });
   });
@@ -364,20 +373,28 @@ test.describe("rsvp", () => {
 
     await page.locator("#rsvp-name").fill("  Asha   Rao ");
     await page.locator("#rsvp-size").selectOption("2");
+    // Bringing someone? Their name is required.
+    await page.locator("#rsvp-yes").click();
+    await expect(page.locator("#rsvp-comp-err")).toBeVisible();
+    expect(api.posts.length).toBe(0);
+    await page.getByLabel("Name of guest 2").fill("Ben");
     // A double tap sends one request.
     await page.locator("#rsvp-yes").dblclick();
     await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeFocused();
     expect(api.posts.length).toBe(1);
     expect(api.posts[0]).toMatchObject({ name: "Asha Rao", status: "yes", partySize: 2, publicName: "Asha" });
-    expect(["sunny", "sky", "fern", "plum", "mint", "sand"]).toContain(api.posts[0].character);
+    expect(String(api.posts[0].character)).toMatch(/^\d\.\d\.\d\.\d\.\d$/);
+    expect(api.posts[0].companions).toMatchObject([{ name: "Ben" }]);
+    await expect(page.locator("#park .pet")).toHaveCount(1);
+    await expect(page.locator("#park .pet-name")).toHaveText("Ben");
     // The guest is in the park straight away, with their first name, and is told so.
     await expect(page.locator("#park .guest")).toHaveCount(1);
-    await expect(page.locator("#park .guest-name")).toHaveText("Asha");
+    await expect(page.locator("#park .guest-name").first()).toHaveText("Asha");
     await expect(page.locator("#join")).toContainText("everyone invited can see it");
     expect(String(api.posts[0].id)).toMatch(/^[0-9a-f-]{36}$/);
     expect(String(api.posts[0].token)).toMatch(/^[0-9a-f]{64}$/);
-    await expect(page.locator("#yes-sum")).toHaveText("You’re down as Asha Rao, 2 people.");
+    await expect(page.locator("#yes-sum")).toHaveText("You’re down as Asha Rao, with Ben.");
 
     const google = page.getByRole("link", { name: "Add to Google Calendar" });
     await expect(google).toBeVisible();
@@ -405,9 +422,12 @@ test.describe("rsvp", () => {
     await skipToInvite(page);
     await page.locator("#rsvp-name").fill("Asha Rao");
     await page.locator("#rsvp-size").selectOption("3");
+    await page.getByLabel("Name of guest 2").fill("Ben");
+    await page.getByLabel("Name of guest 3").fill("Chitra");
     await page.locator("#rsvp-yes").click();
 
     await expect(page.locator("#rsvp-error")).toBeVisible();
+    await expect(page.getByLabel("Name of guest 3")).toHaveValue("Chitra");
     await expect(page.locator("#rsvp-error")).toContainText("That didn’t save");
     await expect(page.locator("#rsvp-name")).toHaveValue("Asha Rao");
     await expect(page.locator("#rsvp-size")).toHaveValue("3");
@@ -433,50 +453,117 @@ test.describe("rsvp", () => {
     await expect(page.locator("#view-yes")).toBeHidden();
   });
 
-  test("saying yes puts a named character in the park; it can be changed but not removed", async ({ page }, info) => {
+  test("saying yes puts a named character in the park; the look and pets can be changed but not removed", async ({ page }, info) => {
     const api = await mockApi(page);
     await skipToInvite(page);
     await expect(page.locator(".rsvp__public")).toContainText("everyone invited can see");
     await page.locator("#rsvp-name").fill("Asha Rao");
+    await page.locator("#rsvp-size").selectOption("3");
+    await page.getByLabel("Name of guest 2").fill("Ben");
+    await page.getByLabel("Name of guest 3").fill("Chitra");
     await page.locator("#rsvp-yes").click();
     await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
 
     await expect(page.locator("#park .guest")).toHaveCount(1);
-    await expect(page.locator("#park .guest-name")).toHaveText("Asha");
-    const first = api.posts[0].character as string;
-    await expect(page.locator(`input[name="character"][value="${first}"]`)).toBeChecked();
-    // There is no way to hide the name or leave the picture.
+    await expect(page.locator("#park .guest-name:not(.pet-name)")).toHaveText("Asha");
+    await expect(page.locator("#park .pet-name")).toHaveText(["Ben", "Chitra"]);
+    // There is no way to hide the name, drop a pet or leave the picture.
     await expect(page.locator("#join-show, #leave-btn")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /leave/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /leave|remove|hide/i })).toHaveCount(0);
 
-    // Tapping another character changes it straight away, on the same response.
-    const other = first === "fern" ? "sky" : "fern";
-    await page.locator(`input[name="character"][value="${other}"]`).check({ force: true });
-    await expect(page.locator("#join-status")).toHaveText("Changed. That’s you in the park now.");
+    // Customise hair, clothes and a pet, then save: one request, same response.
+    const save = page.getByRole("button", { name: "Save my look" });
+    await expect(save).toBeDisabled();
+    await page.getByRole("button", { name: "Curly" }).click();
+    await page.getByRole("button", { name: "Top 4", exact: true }).click();
+    await page.getByRole("button", { name: "Bottoms 2", exact: true }).click();
+    await page.getByRole("button", { name: "Skin 5", exact: true }).click();
+    await page.locator('.petrow').nth(1).getByRole("button", { name: "Bunny" }).click();
+    await page.locator('.petrow').nth(1).getByRole("button", { name: "Pet colour 5" }).click();
+    expect(api.posts.length).toBe(1);
+    await save.click();
+    await expect(page.locator("#join-status")).toHaveText("Saved. That’s you in the park now.");
     expect(api.posts.length).toBe(2);
-    expect(api.posts[1]).toMatchObject({ character: other, publicName: "Asha", status: "yes" });
+    const look = String(api.posts[1].character).split(".");
+    expect([look[0], look[1], look[3], look[4]]).toEqual(["4", "4", "3", "1"]);
+    expect(api.posts[1].companions).toMatchObject([{ name: "Ben" }, { name: "Chitra", pet: "2.4" }]);
     expect(api.posts[1].id).toBe(api.posts[0].id);
     await expect(page.locator("#park .guest")).toHaveCount(1);
-    await page.waitForTimeout(900);
+    await expect(page.locator("#park .pet")).toHaveCount(2);
+
+    // Drag your own character to a new place in the park.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const me = page.locator("#park .guest.you .figure");
+    await expect(me).toHaveCount(1);
+    const from = (await me.boundingBox())!;
+    const sx = from.x + from.width / 2;
+    const sy = from.y + from.height / 2;
+    if (isPhone(info)) {
+      await touchDrag(page, [[sx, sy], [sx - 20, sy + 15], [sx - 50, sy + 40], [sx - 70, sy + 60]]);
+    } else {
+      await page.mouse.move(sx, sy);
+      await page.mouse.down();
+      await page.mouse.move(sx - 60, sy + 20, { steps: 5 });
+      await page.mouse.move(sx - 140, sy + 60, { steps: 5 });
+      await page.mouse.up();
+    }
+    await expect.poll(() => api.posts.length).toBe(3);
+    const pos = api.posts[2].pos as number[];
+    expect(pos.length).toBe(2);
+    for (const n of pos) {
+      expect(n).toBeGreaterThanOrEqual(0);
+      expect(n).toBeLessThanOrEqual(1);
+    }
+    await expect(page.locator("#live")).toHaveText(/Your character has moved/);
+    await expect(page.locator("#park .guest.you .figure")).toHaveCount(1);
+    const to = (await page.locator("#park .guest.you .figure").boundingBox())!;
+    expect(to.x).toBeLessThan(from.x - 30);
+    expect(to.y).toBeGreaterThan(from.y + 20);
+    await page.waitForTimeout(600);
     await page.screenshot({ path: info.outputPath("5-joined.png") });
 
-    // The character survives a reload, and a changed name updates the label.
+    // The look, the pets and the place all survive a reload, and the character is still draggable.
     await page.reload();
-    await expect(page.locator("#park .guest-name")).toHaveText("Asha");
-    await expect(page.locator(`input[name="character"][value="${other}"]`)).toBeChecked();
-    await page.getByRole("button", { name: "Change my response" }).click();
-    await page.locator("#rsvp-name").fill("Ash Rao");
-    await page.locator("#rsvp-yes").click();
-    await expect(page.locator("#park .guest-name")).toHaveText("Ash");
-    expect(api.posts[2]).toMatchObject({ character: other, publicName: "Ash" });
+    await expect(page.locator("#park .guest.you")).toHaveCount(1);
+    await expect(page.locator("#park .pet-name")).toHaveText(["Ben", "Chitra"]);
+    const again = (await page.locator("#park .guest.you .figure").boundingBox())!;
+    expect(Math.abs(again.x - to.x)).toBeLessThan(6);
+    await expect(page.getByRole("button", { name: "Curly" })).toHaveAttribute("aria-pressed", "true");
 
-    // Changing to no removes the character from the gathering.
+    // Changing to no removes the character and its pets from the gathering.
     await page.getByRole("button", { name: "Change my response" }).click();
+    await expect(page.getByLabel("Name of guest 2")).toHaveValue("Ben");
     await page.locator("#rsvp-no").focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { name: "You’ll be missed. Thanks for letting me know." })).toBeVisible();
     await expect(page.locator("#park .guest")).toHaveCount(0);
+    await expect(page.locator("#park .pet")).toHaveCount(0);
     await expect(page.locator("#count-badge")).toBeHidden();
+  });
+
+  test("the park is lively after the reveal and hides a few secrets", async ({ page }) => {
+    await mockApi(page);
+    await skipToInvite(page);
+    // Jacob wears his party cap in the park and in the portrait.
+    expect(await page.locator("#it-jacob").innerHTML()).toContain("M-14,-144 L1,-186");
+    await page.evaluate(() => window.scrollTo(0, 0));
+    // The other park-goers are moving.
+    const jogger = page.locator("#it-jogger .figure");
+    const a = (await jogger.boundingBox())!;
+    await page.waitForTimeout(700);
+    const b = (await jogger.boundingBox())!;
+    expect(Math.abs(b.x - a.x)).toBeGreaterThan(2);
+
+    await expect(page.locator("#egg-chip")).toBeHidden();
+    await page.locator("#it-pond ellipse").first().click({ force: true, position: { x: 22, y: 30 } });
+    await expect(page.locator("#it-pond")).toHaveClass(/splash/);
+    await expect(page.locator("#egg-chip")).toHaveText("Secrets found: 1 of 7");
+    await page.locator("#it-jacob .figure").click({ force: true });
+    await expect(page.locator("#park .confetti .bit")).toHaveCount(26);
+    await expect(page.locator("#egg-chip")).toHaveText("Secrets found: 2 of 7");
+    // Found secrets are remembered.
+    await page.reload();
+    await expect(page.locator("#egg-chip")).toHaveText("Secrets found: 2 of 7");
   });
 });
 
