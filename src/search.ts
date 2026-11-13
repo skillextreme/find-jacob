@@ -110,6 +110,7 @@ export class Search {
     this.nx = pv.x;
     this.ny = pv.y;
     this.park.setCover("covering");
+    this.park.setLens(true);
     this.relayout();
     this.lastMove = this.lastFrame = performance.now();
     cancelAnimationFrame(this.raf);
@@ -294,6 +295,7 @@ export class Search {
     this.bubble.hidden = true;
     this.park.plane.style.display = "none";
     this.park.el("jacob").classList.add("wave");
+    this.park.setLens(false);
     this.hooks.onRevealStart();
 
     const finish = () => {

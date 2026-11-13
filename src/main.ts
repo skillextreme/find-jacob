@@ -84,7 +84,7 @@ function showAttendees(arrive: "all" | "self" | "none"): void {
   const total = attendees?.totalComing ?? 0;
   countBadge.hidden = total <= 0;
   countBadge.textContent = total === 1 ? "1 coming" : `${total} coming`;
-  invite?.setCount(attendees ? total : null);
+  invite?.setCount(attendees ? total : null, (attendees?.guests ?? []).flatMap((g) => (g.displayName ? [g.displayName] : [])));
   if (!park) return;
   park.setGuests(attendees?.guests ?? [], you, arrive === "all" ? "all" : arrive === "self" ? you : null);
 }
@@ -185,8 +185,13 @@ async function boot(): Promise<void> {
     return;
   }
   loading.hidden = true;
-  if (hasFound()) enterInvite(false);
-  else startSearch();
+  if (hasFound()) {
+    enterInvite(false);
+  } else {
+    startSearch();
+    // Build the (still hidden) invitation while the guest is searching, so the reveal ends without a hitch.
+    window.setTimeout(() => ensureInvite(), 600);
+  }
 }
 
 /** Artwork didn't load: offer a retry and show the readable invitation straight away. */

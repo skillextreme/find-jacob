@@ -111,20 +111,48 @@ html.is-searching body {
   height: 100%;
 }
 
-#park[data-cover="hidden"] #cover {
+/* The cover: one flat layer with a round hole, a ring and a centre dot, all drawn as a gradient.
+   Moving the window only changes three numbers, so phones redraw it quickly. */
+#cover {
+  --x: 50%;
+  --y: 50%;
+  --r: 0px;
+  --ring: var(--line);
+  --dot: 3.5px;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at var(--x) var(--y), var(--ink) 0 var(--dot), transparent calc(var(--dot) + 0.6px)),
+    radial-gradient(
+      circle at var(--x) var(--y),
+      transparent 0 max(0px, calc(var(--r) - 3.4px)),
+      var(--ring) max(0px, calc(var(--r) - 2.8px)) var(--r),
+      var(--cream) calc(var(--r) + 0.6px)
+    );
+}
+#cover.no-lens {
+  --ring: var(--cream);
+  --dot: 0px;
+}
+[data-state="loading"] #cover {
+  --dot: 0px;
+}
+#park[data-cover="hidden"] + #cover {
   opacity: 0;
   transition: opacity 0.2s linear;
 }
-#park[data-cover="gone"] #cover {
+#park[data-cover="gone"] + #cover {
   display: none;
 }
 #lens {
   pointer-events: none;
 }
-[data-state="revealing"] #lens-dot,
-[data-state="revealing"] #lens-ring {
-  opacity: 0;
-  transition: opacity 0.3s;
+
+/* Nothing off-screen needs to move while the park is hidden. */
+[data-state="searching"] :is(.cloud, .kite, .flutter, .balloon),
+[data-state="loading"] :is(.cloud, .kite, .flutter, .balloon) {
+  animation-play-state: paused;
 }
 
 [data-state="invite"] .finder {
@@ -419,6 +447,16 @@ html.is-searching body {
   line-height: 1.2;
 }
 
+.rsvp__who {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  font-weight: 500;
+  background: var(--cream);
+  border-radius: 12px;
+}
+.rsvp__who[hidden] {
+  display: none;
+}
 .field {
   margin: 12px 0;
 }
@@ -839,9 +877,15 @@ html.is-searching body {
   animation: drop 0.6s cubic-bezier(0.3, 1.5, 0.5, 1) both;
   animation-delay: var(--delay, 0ms);
 }
+#labels {
+  pointer-events: none;
+}
+.guest-name.arrive {
+  animation: fade 0.5s 0.4s both;
+}
 .guest-name {
   font-family: inherit;
-  font-size: 24px;
+  font-size: 25px;
   font-weight: 700;
   fill: var(--ink);
   stroke: #fffdf5;
@@ -1031,7 +1075,7 @@ html.is-searching body {
   .invite.fade-in .card {
     animation-duration: 0.2s !important;
   }
-  #park[data-cover="hidden"] #cover {
+  #park[data-cover="hidden"] + #cover {
     transition-duration: 0.2s !important;
   }
   .jacob.wave .arm-r,

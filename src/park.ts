@@ -141,11 +141,11 @@ export class Park {
   private bg: SVGGElement;
   private flat: SVGGElement;
   private standing: SVGGElement;
-  private cover: SVGRectElement;
-  private maskRect: SVGRectElement;
+  /** Flat cream overlay with a round hole. Far cheaper to redraw on phones than an SVG mask. */
+  private cover: HTMLDivElement;
   private hole: SVGCircleElement;
-  private ring: SVGCircleElement;
-  private dot: SVGCircleElement;
+  private box = { left: 0, top: 0 };
+  private lensOn = true;
   readonly lens: SVGGElement;
   readonly plane: SVGGElement;
   private els = new Map<string, SVGGElement>();
@@ -161,22 +161,16 @@ export class Park {
     svg.setAttribute("aria-hidden", "true");
     svg.setAttribute("focusable", "false");
     svg.innerHTML =
-      `<g id="bg"></g><g id="flat"></g><g id="standing"></g>` +
-      `<defs><mask id="cover-mask" maskUnits="userSpaceOnUse"><rect id="mask-rect" fill="#fff"/><circle id="mask-hole" fill="#000" r="0"/></mask></defs>` +
-      `<rect id="cover" fill="${C.cream}" mask="url(#cover-mask)"/>` +
-      `<g id="lens"><circle id="lens-ring" fill="none" stroke="${C.line}" stroke-width="3" opacity=".85"/>` +
-      `<g id="hint-plane" style="display:none">${art.paperPlane()}</g>` +
-      `<circle id="lens-dot" fill="${C.ink}"/></g>`;
+      `<g id="bg"></g><g id="flat"></g><g id="standing"></g><g id="labels"></g>` +
+      // The circle below is never drawn: it records where the window is, in scene units.
+      `<defs><circle id="mask-hole" r="0"/></defs>` +
+      `<g id="lens"><g id="hint-plane" style="display:none">${art.paperPlane()}</g></g>`;
     this.svg = svg;
     const q = <T extends Element>(sel: string) => svg.querySelector(sel) as T;
     this.bg = q("#bg");
     this.flat = q("#flat");
     this.standing = q("#standing");
-    this.cover = q("#cover");
-    this.maskRect = q("#mask-rect");
     this.hole = q("#mask-hole");
-    this.ring = q("#lens-ring");
-    this.dot = q("#lens-dot");
     this.lens = q("#lens");
     this.plane = q("#hint-plane");
 
@@ -189,6 +183,9 @@ export class Park {
       this.els.set(def.id, g);
     }
     holder.appendChild(svg);
+    this.cover = document.createElement("div");
+    this.cover.id = "cover";
+    holder.appendChild(this.cover);
   }
 
   /** Recomputes the composition for a viewport. Safe to call on every resize. */
@@ -205,18 +202,6 @@ export class Park {
     const { W, H, mode } = this;
     this.svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     this.svg.setAttribute("preserveAspectRatio", mode === "portrait" ? "xMidYMax slice" : "xMidYMid slice");
-    for (const r of [this.cover, this.maskRect]) {
-      r.setAttribute("x", "-20");
-      r.setAttribute("y", "-20");
-      r.setAttribute("width", String(W + 40));
-      r.setAttribute("height", String(H + 40));
-    }
-    const mask = this.svg.querySelector("#cover-mask")!;
-    mask.setAttribute("x", "-20");
-    mask.setAttribute("y", "-20");
-    mask.setAttribute("width", String(W + 40));
-    mask.setAttribute("height", String(H + 40));
-
     // Place items.
     this.spots.clear();
     const key = mode === "landscape" ? "L" : "P";
@@ -335,6 +320,9 @@ export class Park {
 
   private renderGuests(arrive: number | "all" | null): void {
     this.standing.querySelectorAll(".guest").forEach((n) => n.remove());
+    // Names sit in their own layer on top, so a guest standing in front never hides one.
+    const labels = this.svg.querySelector("#labels")!;
+    labels.replaceChildren();
     const b = this.spots.get("blanket");
     if (b) {
       const xs = this.mode === "portrait" ? 0.8 : 1;
@@ -352,11 +340,13 @@ export class Park {
         g.innerHTML = `<g class="guest-in">${art.guestFigure(guest.character)}</g>`;
         if (guest.displayName) {
           const t = document.createElementNS(SVG_NS, "text");
-          t.setAttribute("class", "guest-name");
-          t.setAttribute("y", "24");
+          t.setAttribute("class", `guest-name${animate ? " arrive" : ""}`);
+          t.setAttribute("transform", `translate(${f(x)},${f(y)}) scale(${gs})`);
+          // Neighbours in a row alternate between two heights so their names don't run together.
+          t.setAttribute("y", Math.round(dx / 76 + 10) % 2 === 0 ? "26" : "50");
           t.setAttribute("text-anchor", "middle");
           t.textContent = guest.displayName; // plain text, never markup
-          g.appendChild(t);
+          labels.appendChild(t);
         }
         this.standing.appendChild(g);
       });
@@ -387,6 +377,8 @@ export class Park {
   refreshMatrix(): void {
     const m = this.svg.getScreenCTM();
     this.fwd = m ? DOMMatrix.fromMatrix(m) : null;
+    const b = this.svg.getBoundingClientRect();
+    this.box = { left: b.left, top: b.top };
     this.inv = this.fwd ? this.fwd.inverse() : null;
   }
 
@@ -421,17 +413,21 @@ export class Park {
   /* ---------- Cover and lens ---------- */
 
   setHole(x: number, y: number, r: number): void {
-    const xs = f(x), ys = f(y), rs = f(Math.max(0, r));
-    this.hole.setAttribute("cx", xs);
-    this.hole.setAttribute("cy", ys);
-    this.hole.setAttribute("r", rs);
-    this.ring.setAttribute("cx", xs);
-    this.ring.setAttribute("cy", ys);
-    this.ring.setAttribute("r", rs);
-    this.dot.setAttribute("cx", xs);
-    this.dot.setAttribute("cy", ys);
-    this.dot.setAttribute("r", f(3.5 * this.unitsPerPx()));
-    this.ring.setAttribute("stroke-width", f(3 * this.unitsPerPx()));
+    this.hole.setAttribute("cx", f(x));
+    this.hole.setAttribute("cy", f(y));
+    this.hole.setAttribute("r", f(Math.max(0, r)));
+    const c = this.toClient(x, y);
+    const st = this.cover.style;
+    st.setProperty("--x", `${(c.x - this.box.left).toFixed(1)}px`);
+    st.setProperty("--y", `${(c.y - this.box.top).toFixed(1)}px`);
+    st.setProperty("--r", `${Math.max(0, r / this.unitsPerPx()).toFixed(1)}px`);
+  }
+
+  /** Shows or hides the ring and centre dot (hidden while the window expands). */
+  setLens(on: boolean): void {
+    if (on === this.lensOn) return;
+    this.lensOn = on;
+    this.cover.classList.toggle("no-lens", !on);
   }
 
   setCover(state: "hidden" | "covering" | "gone"): void {

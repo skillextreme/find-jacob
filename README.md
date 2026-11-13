@@ -31,7 +31,9 @@ To correct or remove a response by hand, use the Netlify dashboard: **Blobs → 
 
 - A guest's device creates a response id and a private edit token. The server stores only a SHA-256 hash of the token. Sending the same id and token again updates the same response, so double taps and retries never create a second attendee.
 - A guest can change their answer from the same device. A different device creates a new response (the host view shows both, and you can delete one in the Blobs dashboard).
-- The public list (`/api/attendees`) returns only the headcount, chosen characters and first names that guests chose to show. No full names, ids or tokens.
+- Everyone who says yes appears in the park with a character (random at first, changeable) and their first name. This is public to anyone with the link and is not optional; the form says so before they answer.
+- The public list (`/api/attendees`) returns only the headcount and, for each yes, a character and first name. No surnames, ids or tokens, and nobody who said no.
+- The "Can't make it" button runs away from the mouse or finger and can't be clicked. Only keyboard users (Tab, then Enter) can decline on the site.
 - Anyone with the link can RSVP. Writes are limited to 20 per IP address per 10 minutes.
 
 ## Develop

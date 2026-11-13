@@ -369,7 +369,12 @@ test.describe("rsvp", () => {
     await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeFocused();
     expect(api.posts.length).toBe(1);
-    expect(api.posts[0]).toMatchObject({ name: "Asha Rao", status: "yes", partySize: 2, character: null, publicName: null });
+    expect(api.posts[0]).toMatchObject({ name: "Asha Rao", status: "yes", partySize: 2, publicName: "Asha" });
+    expect(["sunny", "sky", "fern", "plum", "mint", "sand"]).toContain(api.posts[0].character);
+    // The guest is in the park straight away, with their first name, and is told so.
+    await expect(page.locator("#park .guest")).toHaveCount(1);
+    await expect(page.locator("#park .guest-name")).toHaveText("Asha");
+    await expect(page.locator("#join")).toContainText("everyone invited can see it");
     expect(String(api.posts[0].id)).toMatch(/^[0-9a-f-]{36}$/);
     expect(String(api.posts[0].token)).toMatch(/^[0-9a-f]{64}$/);
     await expect(page.locator("#yes-sum")).toHaveText("You’re down as Asha Rao, 2 people.");
@@ -428,30 +433,42 @@ test.describe("rsvp", () => {
     await expect(page.locator("#view-yes")).toBeHidden();
   });
 
-  test("join the park, show a first name by choice, and leave when changing to no", async ({ page }, info) => {
+  test("saying yes puts a named character in the park; it can be changed but not removed", async ({ page }, info) => {
     const api = await mockApi(page);
     await skipToInvite(page);
+    await expect(page.locator(".rsvp__public")).toContainText("everyone invited can see");
     await page.locator("#rsvp-name").fill("Asha Rao");
     await page.locator("#rsvp-yes").click();
     await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
 
-    const join = page.getByRole("button", { name: "Join the park" });
-    await expect(join).toBeDisabled();
-    await expect(page.locator("#join-show")).not.toBeChecked();
-    await page.getByRole("radio", { name: /Fern/ }).check({ force: true });
-    await join.click();
     await expect(page.locator("#park .guest")).toHaveCount(1);
-    await expect(page.locator("#park .guest-name")).toHaveCount(0);
-    expect(api.posts[1]).toMatchObject({ character: "fern", publicName: null, status: "yes" });
-
-    // Opt in to showing the first name.
-    await page.locator("#join-show").check();
-    await page.getByRole("button", { name: "Update my character" }).click();
     await expect(page.locator("#park .guest-name")).toHaveText("Asha");
-    expect(api.posts[2]).toMatchObject({ character: "fern", publicName: "Asha" });
-    expect(api.posts[2].id).toBe(api.posts[0].id);
+    const first = api.posts[0].character as string;
+    await expect(page.locator(`input[name="character"][value="${first}"]`)).toBeChecked();
+    // There is no way to hide the name or leave the picture.
+    await expect(page.locator("#join-show, #leave-btn")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /leave/i })).toHaveCount(0);
+
+    // Tapping another character changes it straight away, on the same response.
+    const other = first === "fern" ? "sky" : "fern";
+    await page.locator(`input[name="character"][value="${other}"]`).check({ force: true });
+    await expect(page.locator("#join-status")).toHaveText("Changed. That’s you in the park now.");
+    expect(api.posts.length).toBe(2);
+    expect(api.posts[1]).toMatchObject({ character: other, publicName: "Asha", status: "yes" });
+    expect(api.posts[1].id).toBe(api.posts[0].id);
+    await expect(page.locator("#park .guest")).toHaveCount(1);
     await page.waitForTimeout(900);
     await page.screenshot({ path: info.outputPath("5-joined.png") });
+
+    // The character survives a reload, and a changed name updates the label.
+    await page.reload();
+    await expect(page.locator("#park .guest-name")).toHaveText("Asha");
+    await expect(page.locator(`input[name="character"][value="${other}"]`)).toBeChecked();
+    await page.getByRole("button", { name: "Change my response" }).click();
+    await page.locator("#rsvp-name").fill("Ash Rao");
+    await page.locator("#rsvp-yes").click();
+    await expect(page.locator("#park .guest-name")).toHaveText("Ash");
+    expect(api.posts[2]).toMatchObject({ character: other, publicName: "Ash" });
 
     // Changing to no removes the character from the gathering.
     await page.getByRole("button", { name: "Change my response" }).click();

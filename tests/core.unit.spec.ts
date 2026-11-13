@@ -21,7 +21,10 @@ test("creates one response and repeats are idempotent", async () => {
   const kv = memoryKV();
   const first = await handleRsvp(base, "1.1.1.1", kv, 1000);
   expect(first.status).toBe(200);
-  expect(first.body).toMatchObject({ ok: true, attendees: { totalComing: 2, guests: [] }, you: null });
+  // Saying yes always adds a character (random when none was sent) with the first name.
+  expect(first.body).toMatchObject({ ok: true, attendees: { totalComing: 2, guests: [{ displayName: "Asha" }] }, you: 0 });
+  const guest = (first.body.attendees as { guests: { character: string }[] }).guests[0];
+  expect(["sunny", "sky", "fern", "plum", "mint", "sand"]).toContain(guest.character);
   // Double tap and retry: same id and token.
   await Promise.all([handleRsvp(base, "1.1.1.1", kv, 1001), handleRsvp(base, "1.1.1.1", kv, 1002)]);
   expect((await kv.list("responses/")).length).toBe(1);
@@ -50,12 +53,12 @@ test("changing to no updates the count and removes the character together", asyn
   await handleRsvp({ ...base, character: "fern", publicName: "Asha" }, "1.1.1.1", kv, 1000);
   await handleRsvp({ ...base, id: ID_B, token: TOKEN_B, name: "Ben", partySize: 1, character: "sky" }, "2.2.2.2", kv, 2000);
   let pub = await publicAttendees(kv);
-  expect(pub).toEqual({ totalComing: 3, guests: [{ character: "fern", displayName: "Asha" }, { character: "sky" }] });
+  expect(pub).toEqual({ totalComing: 3, guests: [{ character: "fern", displayName: "Asha" }, { character: "sky", displayName: "Ben" }] });
 
   const res = await handleRsvp({ ...base, status: "no", character: "fern", publicName: "Asha" }, "1.1.1.1", kv, 3000);
-  expect(res.body).toMatchObject({ you: null, attendees: { totalComing: 1, guests: [{ character: "sky" }] } });
+  expect(res.body).toMatchObject({ you: null, attendees: { totalComing: 1, guests: [{ character: "sky", displayName: "Ben" }] } });
   pub = await publicAttendees(kv);
-  expect(pub).toEqual({ totalComing: 1, guests: [{ character: "sky" }] });
+  expect(pub).toEqual({ totalComing: 1, guests: [{ character: "sky", displayName: "Ben" }] });
 });
 
 test("reports the caller's own character index privately", async () => {
@@ -65,16 +68,18 @@ test("reports the caller's own character index privately", async () => {
   expect(res.body.you).toBe(1);
 });
 
-test("public data never includes names, ids or tokens unless opted in", async () => {
+test("public data shows first names only: no surnames, ids or tokens, and nobody who said no", async () => {
   const kv = memoryKV();
-  await handleRsvp({ ...base, character: "plum", publicName: null }, "1.1.1.1", kv);
-  const text = JSON.stringify(await publicAttendees(kv));
-  expect(text).not.toContain("Asha");
+  await handleRsvp({ ...base, character: "plum", publicName: "Something Else" }, "1.1.1.1", kv);
+  await handleRsvp({ ...base, id: ID_B, token: TOKEN_B, name: "Ben Thomas", status: "no", partySize: 1 }, "2.2.2.2", kv);
+  const pub = await publicAttendees(kv);
+  // The public name always comes from the name given; a guest cannot hide it or swap it.
+  expect(pub).toEqual({ totalComing: 2, guests: [{ character: "plum", displayName: "Asha" }] });
+  const text = JSON.stringify(pub);
+  expect(text).not.toContain("Rao");
+  expect(text).not.toContain("Ben");
   expect(text).not.toContain(ID_A);
   expect(text).not.toContain(sha256(TOKEN_A));
-  // A public name without a character is dropped.
-  await handleRsvp({ ...base, character: null, publicName: "Asha" }, "1.1.1.1", kv);
-  expect(JSON.stringify(await publicAttendees(kv))).not.toContain("Asha");
 });
 
 test("validates input", async () => {
@@ -87,7 +92,6 @@ test("validates input", async () => {
   expect(await bad({ partySize: 6 })).toBe(400);
   expect(await bad({ partySize: 1.5 })).toBe(400);
   expect(await bad({ character: "dragon" })).toBe(400);
-  expect(await bad({ character: "fern", publicName: "y".repeat(21) })).toBe(400);
   expect(await bad({ id: "not-an-id" })).toBe(400);
   expect(await bad({ token: "short" })).toBe(400);
   expect((await handleRsvp(null, "1.1.1.1", kv)).status).toBe(400);

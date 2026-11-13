@@ -52,14 +52,16 @@ export class Invite {
     this.$("#invite-title").focus({ preventScroll: false });
   }
 
-  setCount(total: number | null): void {
+  /** Headcount and first names of everyone who said yes, as plain readable text. */
+  setCount(total: number | null, names: string[] = []): void {
     const el = this.$("#rsvp-count");
     if (total === null || total <= 0) {
       el.hidden = true;
       return;
     }
     el.hidden = false;
-    el.textContent = total === 1 ? "1 person is coming so far." : `${total} people are coming so far.`;
+    const count = total === 1 ? "1 person is coming so far" : `${total} people are coming so far`;
+    el.textContent = names.length ? `${count}: ${names.join(", ")}.` : `${count}.`;
   }
 
   /* ---------- Markup ---------- */
@@ -93,9 +95,9 @@ export class Invite {
     </dl>
 
     <section class="rsvp" aria-labelledby="rsvp-h">
+      <p id="rsvp-count" class="rsvp__who" hidden></p>
       <form id="rsvp-form" novalidate>
         <h3 id="rsvp-h">Are you coming?</h3>
-        <p id="rsvp-count" class="muted" hidden></p>
         <div class="field">
           <label for="rsvp-name">Your name</label>
           <input id="rsvp-name" name="name" type="text" maxlength="${LIMITS.nameMax}" autocomplete="name" autocapitalize="words" enterkeyhint="done" aria-describedby="rsvp-name-err" />
@@ -110,6 +112,7 @@ export class Invite {
           <button type="button" id="rsvp-no" class="btn btn--ghost">Can’t make it</button>
           <p id="dodge-msg" class="rsvp__dodge" aria-live="polite"></p>
         </div>
+        <p class="muted small rsvp__public">Saying yes adds a character with your first name to the park, where everyone invited can see who’s coming.</p>
         <p id="rsvp-saving" class="muted" role="status" hidden>Saving…</p>
         <div id="rsvp-error" class="notice notice--error" role="alert" hidden>
           <p id="rsvp-error-text"></p>
@@ -128,17 +131,9 @@ export class Invite {
         <p class="muted small">If plans change, I’ll tell you on WhatsApp. A saved calendar entry won’t update by itself.</p>
 
         <fieldset class="join" id="join">
-          <legend>Join the park <span class="muted">(optional)</span></legend>
-          <p class="small">Pick a character to stand at the picnic in the drawing.</p>
+          <legend>You’re in the park</legend>
+          <p class="small">This character is standing at the picnic with your first name (<b id="join-first"></b>), where everyone invited can see it. Tap another one to change it.</p>
           <div class="join__grid">${chars}</div>
-          <label class="check">
-            <input type="checkbox" id="join-show" />
-            <span>Show my first name (<b id="join-first"></b>) under my character. Other guests will see it. It stays hidden unless you tick this.</span>
-          </label>
-          <div class="join__actions">
-            <button type="button" id="join-btn" class="btn btn--primary" disabled>Join the park</button>
-            <button type="button" id="leave-btn" class="btn btn--link" hidden>Leave the picture</button>
-          </div>
           <p id="join-status" class="muted small" role="status"></p>
           <div id="join-error" class="notice notice--error" role="alert" hidden>
             <p id="join-error-text"></p>
@@ -216,15 +211,13 @@ export class Invite {
     this.$("#change-yes").addEventListener("click", () => this.showForm(true));
     this.$("#change-no").addEventListener("click", () => this.showForm(true));
 
-    // Join the park.
-    const joinBtn = this.$<HTMLButtonElement>("#join-btn");
+    // Everyone who says yes is in the park. Tapping another character changes theirs straight away.
     this.root.querySelectorAll<HTMLInputElement>('input[name="character"]').forEach((r) =>
       r.addEventListener("change", () => {
-        joinBtn.disabled = false;
+        const picked = this.selectedCharacter();
+        if (picked) void this.join(picked);
       }),
     );
-    joinBtn.addEventListener("click", () => void this.join(this.selectedCharacter()));
-    this.$("#leave-btn").addEventListener("click", () => void this.join(null));
     this.$("#join-retry").addEventListener("click", () => void this.send());
   }
 
@@ -253,6 +246,12 @@ export class Invite {
       const cx = pad + Math.random() * (maxX - pad);
       const cy = pad + Math.random() * (maxY - pad);
       const d = Math.hypot(cx + w / 2 - px, cy + h / 2 - py);
+      // Never land on top of the Yes button or the name field.
+      const blocked = ["#rsvp-yes", "#rsvp-name"].some((sel) => {
+        const o = this.$(sel).getBoundingClientRect();
+        return cx < o.right + 8 && cx + w > o.left - 8 && cy < o.bottom + 8 && cy + h > o.top - 8;
+      });
+      if (blocked) continue;
       if (d > best) {
         best = d;
         x = cx;
@@ -306,15 +305,10 @@ export class Invite {
       const who = rec.partySize > 1 ? `${rec.name}, ${rec.partySize} people` : rec.name;
       this.$("#yes-sum").textContent = `You’re down as ${who}.`;
       this.$("#join-first").textContent = firstName(rec.name);
-      this.$<HTMLInputElement>("#join-show").checked = rec.showName;
       this.root.querySelectorAll<HTMLInputElement>('input[name="character"]').forEach((r) => {
         r.checked = r.value === rec.character;
       });
-      const joined = rec.character !== null;
-      this.$<HTMLButtonElement>("#join-btn").textContent = joined ? "Update my character" : "Join the park";
-      this.$<HTMLButtonElement>("#join-btn").disabled = !joined;
-      this.$("#leave-btn").hidden = !joined;
-      this.$("#join-status").textContent = joined ? "You’re in the park picture." : "";
+      this.$("#join-status").textContent = "";
       this.setJoinError(null);
     }
     if (focus) this.$(yes ? "#yes-h" : "#no-h").focus();
@@ -333,7 +327,10 @@ export class Invite {
   private setSaving(on: boolean): void {
     this.saving = on;
     this.root.querySelector(".rsvp")!.setAttribute("aria-busy", on ? "true" : "false");
-    for (const id of ["#rsvp-yes", "#rsvp-no", "#rsvp-retry", "#rsvp-fresh", "#join-btn", "#leave-btn", "#join-retry"]) {
+    this.root.querySelectorAll<HTMLInputElement>('input[name="character"]').forEach((r) => {
+      r.disabled = on;
+    });
+    for (const id of ["#rsvp-yes", "#rsvp-no", "#rsvp-retry", "#rsvp-fresh", "#join-retry"]) {
       const b = id === "#rsvp-no" ? this.noBtn : this.$<HTMLButtonElement>(id);
       if (on) {
         b.dataset.wasDisabled = b.disabled ? "1" : "";
@@ -390,8 +387,10 @@ export class Invite {
     const partySize = EVENT.plusOnesAllowed ? Math.min(EVENT.maxPartySize, Math.max(1, Math.round(rawSize) || 1)) : 1;
 
     const existing = loadRsvp();
-    const identity = existing ?? { ...newIdentity(), character: null, showName: false, saved: false };
-    const record: LocalRsvp = { ...identity, name, status, partySize, saved: false } as LocalRsvp;
+    const identity = existing ?? { ...newIdentity(), character: null, showName: true, saved: false };
+    // Saying yes always puts a character in the park. A first-timer gets a random one and can change it after.
+    const character = identity.character ?? (status === "yes" ? CHARACTER_IDS[Math.floor(Math.random() * CHARACTER_IDS.length)] : null);
+    const record: LocalRsvp = { ...identity, name, status, partySize, character, showName: true, saved: false };
     // Keep the id and token before the first request, so a retry after a dropped connection
     // or a reload updates the same response instead of adding a second one.
     if (!existing) storeRsvp(record);
@@ -399,11 +398,12 @@ export class Invite {
     await this.send();
   }
 
-  private async join(character: CharacterId | null): Promise<void> {
+  private async join(character: CharacterId): Promise<void> {
     if (this.saving) return;
     const rec = loadRsvp();
     if (!rec?.saved || rec.status !== "yes") return;
-    const record: LocalRsvp = { ...rec, character, showName: character !== null && this.$<HTMLInputElement>("#join-show").checked };
+    if (rec.character === character) return;
+    const record: LocalRsvp = { ...rec, character, showName: true };
     this.pending = { kind: "join", record, payload: this.toPayload(record) };
     await this.send();
   }
@@ -416,7 +416,7 @@ export class Invite {
       status: r.status,
       partySize: r.partySize,
       character: r.character,
-      publicName: r.character && r.showName ? firstName(r.name) || null : null,
+      publicName: r.status === "yes" && r.character ? firstName(r.name) || null : null,
     };
   }
 
@@ -434,13 +434,14 @@ export class Invite {
       this.pending = null;
       this.setSaving(false);
       this.showSaved(record, job.kind === "rsvp");
-      const joinedNow = job.kind === "join" && record.character !== null;
+      const joinedNow = record.status === "yes" && record.character !== null;
       this.hooks.onAttendees(res.attendees, res.you, joinedNow);
       if (job.kind === "rsvp") {
-        this.hooks.announce(record.status === "yes" ? "Saved. See you at the picnic." : "Saved. You’ll be missed. Thanks for letting me know.");
+        this.hooks.announce(record.status === "yes" ? "Saved. See you at the picnic. Your character has joined the park." : "Saved. You’ll be missed. Thanks for letting me know.");
       } else {
-        this.hooks.announce(joinedNow ? "Your character has joined the picnic." : "Your character has left the picture.");
-        if (joinedNow) this.hooks.showPark();
+        this.hooks.announce("Your character in the park has changed.");
+        this.$("#join-status").textContent = "Changed. That’s you in the park now.";
+        this.hooks.showPark();
       }
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError("server", "Unexpected error");

@@ -109,12 +109,13 @@ export async function handleRsvp(input: unknown, ip: string, kv: KV, now = Date.
     }
     character = b.character as CharacterId;
   }
+  // Everyone who says yes appears in the park with a character and their first name. It is not optional:
+  // a missing character is filled in at random, and the public name always comes from the name given.
   let publicName: string | null = null;
-  if (b.publicName !== null && b.publicName !== undefined && b.publicName !== "") {
-    publicName = cleanText(b.publicName, LIMITS.publicNameMax);
-    if (!publicName) return { status: 400, body: { error: "invalid_public_name" } };
+  if (b.status === "yes") {
+    if (!character) character = CHARACTER_IDS[Math.floor(Math.random() * CHARACTER_IDS.length)];
+    publicName = name.split(" ")[0].slice(0, LIMITS.publicNameMax);
   }
-  if (!character) publicName = null; // a name is only ever public next to a chosen character
 
   if (await throttled(kv, ip, now)) return { status: 429, body: { error: "rate_limited" } };
 
@@ -146,7 +147,7 @@ export async function handleRsvp(input: unknown, ip: string, kv: KV, now = Date.
   return { status: 200, body: { ok: true, attendees, you } };
 }
 
-/** Public data: only chosen characters, opted-in first names and the headcount. */
+/** Public data: the headcount, plus a character and first name for each guest who said yes. */
 export async function publicAttendees(kv: KV): Promise<PublicAttendees> {
   return toPublic(await allResponses(kv)).attendees;
 }
