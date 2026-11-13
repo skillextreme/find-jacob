@@ -32,7 +32,9 @@ function firstName(name: string): string {
 export class Invite {
   private $: <T extends HTMLElement>(sel: string) => T;
   private saving = false;
-  private dodged = false;
+  private noBtn!: HTMLButtonElement;
+  private fleeing = false;
+  private taunt = 0;
   private lastPointer: { type: string; at: number } | null = null;
   private pending: { payload: RsvpPayload; record: LocalRsvp; kind: "rsvp" | "join" } | null = null;
 
@@ -166,23 +168,38 @@ export class Invite {
     nameInput.addEventListener("input", () => this.setNameError(false));
     this.$("#rsvp-yes").addEventListener("click", () => this.submit("yes"));
 
-    // The decline joke: the button slips away once, then stays put and works normally.
-    // It never submits anything by itself. Keyboard and reduced-motion guests get a still button.
+    // The decline joke: the button can't be caught. It runs to a new spot on the screen whenever a
+    // pointer or finger comes near, and a pointer or touch click never submits anything.
+    // Keyboard activation (Tab, then Enter) still declines, so there is one honest way to say no.
+    this.noBtn = noBtn;
     noBtn.addEventListener("pointerdown", (e) => {
       this.lastPointer = { type: e.pointerType, at: performance.now() };
+      e.preventDefault();
+      this.flee(e.clientX, e.clientY);
     });
-    noBtn.addEventListener("pointerenter", (e) => {
-      if (e.pointerType === "mouse" && this.canDodge()) this.dodge();
-    });
-    noBtn.addEventListener("click", () => {
+    noBtn.addEventListener("pointerenter", (e) => this.flee(e.clientX, e.clientY));
+    noBtn.addEventListener("click", (e) => {
       const p = this.lastPointer;
       this.lastPointer = null;
-      const byTouch = p !== null && p.type !== "mouse" && performance.now() - p.at < 1500;
-      if (byTouch && this.canDodge()) {
-        this.dodge();
+      const byPointer = e.detail > 0 || (p !== null && performance.now() - p.at < 1500);
+      if (byPointer) {
+        this.flee(e.clientX, e.clientY);
         return;
       }
       void this.submit("no");
+    });
+    const near = (e: PointerEvent) => {
+      if (this.saving || this.root.hidden || this.$("#rsvp-form").hidden) return;
+      const r = noBtn.getBoundingClientRect();
+      if (r.width === 0) return;
+      const dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right);
+      const dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
+      if (Math.hypot(dx, dy) < 70) this.flee(e.clientX, e.clientY);
+    };
+    document.addEventListener("pointermove", near, { passive: true });
+    document.addEventListener("pointerdown", near, { passive: true });
+    window.addEventListener("resize", () => {
+      if (this.fleeing) this.flee(-999, -999);
     });
 
     this.$("#rsvp-retry").addEventListener("click", () => void this.send());
@@ -211,14 +228,53 @@ export class Invite {
     this.$("#join-retry").addEventListener("click", () => void this.send());
   }
 
-  private canDodge(): boolean {
-    return !this.dodged && !this.saving && !this.hooks.reducedMotion();
+  /** Jumps the decline button to a random spot on the screen, well away from the pointer. */
+  private flee(px: number, py: number): void {
+    const btn = this.noBtn;
+    if (this.saving) return;
+    const r = btn.getBoundingClientRect();
+    const w = r.width || 150;
+    const h = r.height || 48;
+    if (!this.fleeing) {
+      // Leave the card (which clips its contents) and live on the screen itself.
+      this.fleeing = true;
+      btn.style.left = `${r.left}px`;
+      btn.style.top = `${r.top}px`;
+      btn.style.width = `${w}px`;
+      btn.classList.add("runaway");
+      document.body.appendChild(btn);
+      void btn.offsetWidth; // start the first move from where it was
+    }
+    const pad = 10;
+    const maxX = Math.max(pad, window.innerWidth - w - pad);
+    const maxY = Math.max(pad, window.innerHeight - h - pad);
+    let x = pad, y = pad, best = -1;
+    for (let i = 0; i < 12; i++) {
+      const cx = pad + Math.random() * (maxX - pad);
+      const cy = pad + Math.random() * (maxY - pad);
+      const d = Math.hypot(cx + w / 2 - px, cy + h / 2 - py);
+      if (d > best) {
+        best = d;
+        x = cx;
+        y = cy;
+      }
+      if (d > 260) break;
+    }
+    btn.style.left = `${x.toFixed(0)}px`;
+    btn.style.top = `${y.toFixed(0)}px`;
+    const lines = ["Nice try.", "Not that one.", "Nope, still no.", "You’re coming. Tap the other one.", "It’s faster than you."];
+    this.$("#dodge-msg").textContent = lines[this.taunt++ % lines.length];
   }
 
-  private dodge(): void {
-    this.dodged = true;
-    this.$("#rsvp-actions").classList.add("has-dodged");
-    this.$("#dodge-msg").textContent = "Okay, okay. Your call.";
+  /** Puts the decline button back in the form (or hides it when the form isn't showing). */
+  homeDecline(): void {
+    if (!this.fleeing) return;
+    this.fleeing = false;
+    const btn = this.noBtn;
+    btn.classList.remove("runaway");
+    btn.style.left = btn.style.top = btn.style.width = "";
+    this.$("#rsvp-actions").insertBefore(btn, this.$("#dodge-msg"));
+    this.$("#dodge-msg").textContent = "";
   }
 
   private showInitialView(): void {
@@ -228,6 +284,7 @@ export class Invite {
   }
 
   private showForm(focus: boolean, rec: LocalRsvp | null = loadRsvp()): void {
+    this.homeDecline();
     this.$("#rsvp-form").hidden = false;
     this.$("#view-yes").hidden = true;
     this.$("#view-no").hidden = true;
@@ -240,6 +297,7 @@ export class Invite {
   }
 
   private showSaved(rec: LocalRsvp, focus: boolean): void {
+    this.homeDecline();
     this.$("#rsvp-form").hidden = true;
     const yes = rec.status === "yes";
     this.$("#view-yes").hidden = !yes;
@@ -276,7 +334,7 @@ export class Invite {
     this.saving = on;
     this.root.querySelector(".rsvp")!.setAttribute("aria-busy", on ? "true" : "false");
     for (const id of ["#rsvp-yes", "#rsvp-no", "#rsvp-retry", "#rsvp-fresh", "#join-btn", "#leave-btn", "#join-retry"]) {
-      const b = this.$<HTMLButtonElement>(id);
+      const b = id === "#rsvp-no" ? this.noBtn : this.$<HTMLButtonElement>(id);
       if (on) {
         b.dataset.wasDisabled = b.disabled ? "1" : "";
         b.disabled = true;

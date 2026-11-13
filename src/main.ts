@@ -141,6 +141,7 @@ function enterInvite(animated: boolean): void {
 
 function startSearch(): void {
   if (!park || !search) return;
+  invite?.homeDecline();
   inviteRoot.hidden = true;
   replay.hidden = true;
   countBadge.hidden = true;

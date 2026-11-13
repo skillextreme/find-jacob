@@ -527,21 +527,19 @@ html.is-searching body {
   margin-top: 16px;
   transition: padding-bottom 0.18s ease-out;
 }
-/* After its one dodge the decline button rests in a second row, under its old place and away from Yes. */
-.rsvp__actions.has-dodged {
-  padding-bottom: 62px;
+/* The decline button can't be caught: once approached it leaves the card and runs around the screen. */
+#rsvp-no.runaway {
+  position: fixed;
+  z-index: 50;
+  margin: 0;
+  box-shadow: 0 4px 0 rgba(31, 77, 58, 0.25);
+  transition:
+    left 0.16s ease-out,
+    top 0.16s ease-out;
+  touch-action: none;
 }
-.rsvp__actions.has-dodged #rsvp-no {
-  transform: translateY(62px);
-}
-#rsvp-no {
-  transition: transform 0.18s ease-out;
-}
+/* While it is away, its message keeps its place beside Yes. */
 .rsvp__dodge {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: calc(50% - 6px);
   min-height: 48px;
   margin: 0;
   display: flex;
@@ -1047,8 +1045,5 @@ html.is-searching body {
   }
   .spinner {
     animation: none;
-  }
-  .rsvp__actions.has-dodged #rsvp-no {
-    transform: none;
   }
 }

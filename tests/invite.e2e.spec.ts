@@ -286,67 +286,70 @@ test.describe("search", () => {
 });
 
 test.describe("rsvp", () => {
-  test("the decline joke dodges once and never submits by itself", async ({ page }, info) => {
+  test("the decline button runs away and can never be clicked or tapped", async ({ page }, info) => {
     const api = await mockApi(page);
     await skipToInvite(page);
     await page.locator("#rsvp-name").fill("Asha Rao");
     const no = page.locator("#rsvp-no");
-    const yes = page.locator("#rsvp-yes");
     await no.scrollIntoViewIfNeeded();
-    const start = (await no.boundingBox())!;
+    const vp = page.viewportSize()!;
+    const spots = new Set<string>();
 
-    if (isPhone(info)) await no.tap();
-    else await no.hover();
-
-    await expect(page.locator("#dodge-msg")).toHaveText("Okay, okay. Your call.");
-    await page.waitForTimeout(350);
+    for (let i = 0; i < 12; i++) {
+      const box = (await no.boundingBox())!;
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      if (isPhone(info)) {
+        await page.touchscreen.tap(x, y);
+      } else {
+        await page.mouse.move(x, y, { steps: 6 });
+        await page.mouse.down();
+        await page.mouse.up();
+      }
+      await page.waitForTimeout(260);
+      const after = (await no.boundingBox())!;
+      // It left the spot that was aimed at and stayed fully on screen.
+      expect(Math.hypot(after.x - box.x, after.y - box.y)).toBeGreaterThan(40);
+      expect(after.x).toBeGreaterThanOrEqual(0);
+      expect(after.y).toBeGreaterThanOrEqual(0);
+      expect(after.x + after.width).toBeLessThanOrEqual(vp.width + 1);
+      expect(after.y + after.height).toBeLessThanOrEqual(vp.height + 1);
+      spots.add(`${Math.round(after.x / 40)},${Math.round(after.y / 40)}`);
+    }
+    expect(spots.size).toBeGreaterThan(5);
     expect(api.posts.length).toBe(0);
     await expect(page.locator("#view-no")).toBeHidden();
+    await expect(page.locator("#dodge-msg")).not.toHaveText("");
 
-    // It moved, stayed inside the RSVP area and clear of the Yes button, and now stays put.
-    const moved = (await no.boundingBox())!;
-    const yesBox = (await yes.boundingBox())!;
-    const area = (await page.locator(".rsvp").boundingBox())!;
-    expect(moved.y).toBeGreaterThan(start.y + 40);
-    expect(moved.y).toBeGreaterThanOrEqual(yesBox.y + yesBox.height);
-    expect(moved.x).toBeGreaterThanOrEqual(area.x);
-    expect(moved.x + moved.width).toBeLessThanOrEqual(area.x + area.width + 1);
-    expect(moved.y + moved.height).toBeLessThanOrEqual(area.y + area.height + 1);
-    await expect(no).toBeEnabled();
-
-    if (isPhone(info)) await no.tap();
-    else await no.click();
-    await expect(page.getByRole("heading", { name: "You’ll be missed. Thanks for letting me know." })).toBeVisible();
+    // Yes still works, and the runaway button goes away with the form.
+    await page.locator("#rsvp-yes").click();
+    await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
+    await expect(no).toBeHidden();
     expect(api.posts.length).toBe(1);
-    expect(api.posts[0]).toMatchObject({ name: "Asha Rao", status: "no" });
-    await expect(page.getByRole("button", { name: "Change my response" })).toBeVisible();
-    await expect(page.locator("#cal-google")).toBeHidden();
-    expect(await page.locator("#no-h").boundingBox()).not.toBeNull();
-    const still = (await no.boundingBox()) ?? moved;
-    expect(still).toBeTruthy();
+    expect(api.posts[0]).toMatchObject({ status: "yes" });
   });
 
-  test("keyboard and reduced-motion guests get a still decline button", async ({ page }) => {
+  test("the decline button also runs under reduced motion; the keyboard can still decline", async ({ page }, info) => {
     const api = await mockApi(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await skipToInvite(page);
     await page.locator("#rsvp-name").fill("Kiran");
-    await page.locator("#rsvp-no").focus();
+    const no = page.locator("#rsvp-no");
+    await no.scrollIntoViewIfNeeded();
+    const box = (await no.boundingBox())!;
+    if (isPhone(info)) await page.touchscreen.tap(box.x + 20, box.y + 20);
+    else await page.mouse.click(box.x + 20, box.y + 20);
+    await page.waitForTimeout(150);
+    const after = (await no.boundingBox())!;
+    expect(Math.hypot(after.x - box.x, after.y - box.y)).toBeGreaterThan(40);
+    expect(api.posts.length).toBe(0);
+
+    await no.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { name: "You’ll be missed. Thanks for letting me know." })).toBeFocused();
-    await expect(page.locator("#dodge-msg")).toHaveText("");
     expect(api.posts.length).toBe(1);
-
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.getByRole("button", { name: "Change my response" }).click();
-    const no = page.locator("#rsvp-no");
-    const yes = page.locator("#rsvp-yes");
-    await no.scrollIntoViewIfNeeded();
-    const gap = async () => (await no.boundingBox())!.y - (await yes.boundingBox())!.y;
-    const before = await gap();
-    await no.hover();
-    await page.waitForTimeout(250);
-    expect(Math.abs((await gap()) - before)).toBeLessThan(1);
-    await expect(page.locator("#dodge-msg")).toHaveText("");
+    expect(api.posts[0]).toMatchObject({ name: "Kiran", status: "no" });
+    await expect(no).toBeHidden();
   });
 
   test("yes saves once, confirms and offers the calendar", async ({ page }, info) => {
