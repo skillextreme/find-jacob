@@ -501,6 +501,16 @@ html.is-searching body {
   font-size: 0.85rem;
   font-weight: 400;
 }
+.leaders__empty {
+  margin: 0;
+  font-size: 0.92rem;
+}
+.leaders__empty[hidden] {
+  display: none;
+}
+.leaders ol:empty {
+  display: none;
+}
 .leaders ol {
   margin: 0;
   padding-left: 1.4em;

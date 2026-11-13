@@ -34,6 +34,7 @@ export class Invite {
   private saving = false;
   private noBtn!: HTMLButtonElement;
   private fleeing = false;
+  private fledFrom: { x: number; y: number; at: number } | null = null;
   private taunt = 0;
   private lastPointer: { type: string; at: number } | null = null;
   private pending: { payload: RsvpPayload; record: LocalRsvp; kind: "rsvp" | "join" | "pos" } | null = null;
@@ -93,9 +94,10 @@ export class Invite {
 
     <section class="rsvp" aria-labelledby="rsvp-h">
       <p id="rsvp-count" class="rsvp__who" hidden></p>
-      <div id="leaders" class="leaders" hidden>
+      <div id="leaders" class="leaders">
         <p class="leaders__title">Secret finders <span class="muted">There are ${LIMITS.secretsTotal} hidden in the park. Tap around.</span></p>
         <ol id="leaders-list"></ol>
+        <p id="leaders-empty" class="leaders__empty">No one’s on the board yet. Find one and say yes to be first.</p>
       </div>
       <form id="rsvp-form" novalidate>
         <h3 id="rsvp-h">Are you coming?</h3>
@@ -268,14 +270,23 @@ export class Invite {
       document.body.appendChild(btn);
       void btn.offsetWidth; // start the first move from where it was
     }
+    const now = performance.now();
+    const recent = this.fledFrom && now - this.fledFrom.at < 600 ? this.fledFrom : null;
+    if (!recent) this.fledFrom = { x: r.left, y: r.top, at: now };
     const pad = 10;
     const maxX = Math.max(pad, window.innerWidth - w - pad);
     const maxY = Math.max(pad, window.innerHeight - h - pad);
     let x = pad, y = pad, best = -1;
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 24; i++) {
       const cx = pad + Math.random() * (maxX - pad);
       const cy = pad + Math.random() * (maxY - pad);
-      const d = Math.hypot(cx + w / 2 - px, cy + h / 2 - py);
+      // Far from the pointer and far from where it is now, so every escape is a real jump.
+      const d = Math.min(
+        Math.hypot(cx + w / 2 - px, cy + h / 2 - py),
+        Math.hypot(cx - r.left, cy - r.top) * 1.5,
+        // One tap can set off two jumps in a row; the second must not land back where the first began.
+        recent ? Math.hypot(cx - recent.x, cy - recent.y) * 1.5 : Infinity,
+      );
       // Never land on top of the Yes button or the name field.
       const blocked = ["#rsvp-yes", "#rsvp-name"].some((sel) => {
         const o = this.$(sel).getBoundingClientRect();
@@ -438,7 +449,8 @@ export class Invite {
   setLeaders(rows: { name: string; secrets: number }[]): void {
     const box = this.$("#leaders");
     const top = rows.filter((r) => r.secrets > 0).sort((a, b) => b.secrets - a.secrets).slice(0, 5);
-    box.hidden = top.length === 0;
+    box.hidden = false;
+    this.$("#leaders-empty").hidden = top.length > 0;
     const list = this.$("#leaders-list");
     list.replaceChildren();
     for (const r of top) {

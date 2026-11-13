@@ -567,12 +567,15 @@ test.describe("rsvp", () => {
     await expect(page.locator("#egg-chip")).toHaveText("Secrets found: 2 of 7");
 
     // The leaderboard: empty until someone who said yes has found a secret.
-    await expect(page.locator("#leaders")).toBeHidden();
+    await expect(page.locator("#leaders")).toBeVisible();
+    await expect(page.locator("#leaders")).toContainText("No one’s on the board yet");
+    await expect(page.locator("#leaders li")).toHaveCount(0);
     await page.locator("#rsvp-name").fill("Asha Rao");
     await page.locator("#rsvp-yes").click();
     await expect(page.getByRole("heading", { name: "See you at the picnic" })).toBeVisible();
     expect(api.posts[0].secrets).toBe(2);
     await expect(page.locator("#leaders li")).toHaveText(["Asha2 of 7"]);
+    await expect(page.locator("#leaders-empty")).toBeHidden();
     // Finding another one updates the board without asking the guest to do anything.
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator("#it-duck").click({ force: true });
